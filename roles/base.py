@@ -5,7 +5,10 @@ Incapsula:
 - Il ciclo di vita del Server MCP su trasporto Streamable HTTP (uvicorn).
 - La gestione dello stato locale relazionale secondo il modello LoST (Local State Transfer):
   relazioni separate R(m) per ciascuno schema di messaggio m.
-- Le regole formali di viabilità per l'emissione dei messaggi (verifica parametri [in] e [out]).
+- Le regole formali di viabilità per l'emissione dei messaggi:
+  * verifica e recupero dei parametri [in] dallo stato locale;
+  * verifica che nessun parametro [out] sia già vincolato;
+  * verifica che nessun parametro [nil] sia già vincolato.
 - I controlli di consistenza semantica (immutabilità BSPL) e idempotenza (duplicati) in ricezione.
 - La sincronizzazione asincrona reattiva per il coordinamento degli scenari.
 - L'estrazione della storia locale del ruolo per l'History Vector distribuito.
@@ -94,33 +97,29 @@ class BaseRoleNode:
     def check_viability(
         self,
         ID: str,
-        in_params: Dict[str, Any],
-        out_params: List[str],
-        schema: Optional[str] = None,
-    ):
+        in_param_names: List[str],
+        out_params: Dict[str, Any],
+        nil_params: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
         """
-        Verifica le condizioni formali di viabilità per l'emissione di un messaggio:
-        1. Il messaggio non deve essere già stato emesso per questa chiave ID.
-        2. Tutti i parametri [in] devono essere già vincolati localmente e avere valore coincidente.
-        3. Nessun parametro [out] deve risultare già vincolato per la chiave ID (assioma di immutabilità).
-        """
-        if schema and ID in self.relations.get(schema, {}):
-            raise BSPLViabilityError(
-                f"[{self.name}] Emissione non viabile: messaggio '{schema}' già emesso per ID='{ID}'"
-            )
+        Verifica le condizioni formali di viabilità LoST/BSPL per l'emissione di un messaggio:
+        1. Tutti i parametri [in] devono risultare già vincolati nelle relazioni locali per ID.
+        2. Nessun parametro [out] deve risultare già vincolato per la chiave ID (assioma di immutabilità).
+        3. Nessun parametro [nil] deve risultare già vincolato per la chiave ID.
 
-        for param, val in in_params.items():
+        Ritorna il dizionario dei parametri [in] risolti dallo stato locale.
+        """
+        resolved_in_params: Dict[str, Any] = {}
+
+        # 1. Verifica e recupero parametri [in] dallo stato locale
+        for param in in_param_names:
             if not self.has_known_parameter(param, ID):
                 raise BSPLViabilityError(
                     f"[{self.name}] Emissione non viabile: parametro [in] '{param}' non ancora noto per ID='{ID}'"
                 )
-            known = self.get_known_parameter(param, ID)
-            if known != val:
-                raise BSPLViabilityError(
-                    f"[{self.name}] Emissione non viabile: parametro [in] '{param}' discordante "
-                    f"(fornito={val!r}, noto={known!r}) per ID='{ID}'"
-                )
+            resolved_in_params[param] = self.get_known_parameter(param, ID)
 
+        # 2. Verifica che nessun parametro [out] sia già vincolato
         for param in out_params:
             if self.has_known_parameter(param, ID):
                 known = self.get_known_parameter(param, ID)
@@ -128,6 +127,17 @@ class BaseRoleNode:
                     f"[{self.name}] Emissione non viabile: parametro [out] '{param}' già vincolato "
                     f"(valore={known!r}) per ID='{ID}'"
                 )
+
+        # 3. Verifica che nessun parametro [nil] sia già vincolato
+        for param in nil_params or []:
+            if self.has_known_parameter(param, ID):
+                known = self.get_known_parameter(param, ID)
+                raise BSPLViabilityError(
+                    f"[{self.name}] Emissione non viabile: parametro [nil] '{param}' già vincolato "
+                    f"(valore={known!r}) per ID='{ID}'"
+                )
+
+        return resolved_in_params
 
     def check_consistency(self, ID: str, params: Dict[str, Any]):
         """

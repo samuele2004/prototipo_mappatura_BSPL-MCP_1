@@ -8,7 +8,7 @@ Definizione del ruolo nel protocollo:
 - RICEZIONE (Tool MCP esposti):
   * ship(ID, item, address) [Seller -> Shipper: ship]
 - EMISSIONE (Metodi pubblici per l'invio messaggi via Client MCP):
-  * send_deliver(ID, item, address, outcome) [Shipper -> Buyer: deliver]
+  * send_deliver(ID, outcome) [Shipper -> Buyer: deliver]
 """
 
 import asyncio
@@ -87,20 +87,23 @@ class ShipperNode(BaseRoleNode):
     async def send_deliver(
         self,
         ID: str,
-        item: str,
-        address: str,
         outcome: str = "delivered"
     ):
         """
         Messaggio BSPL: Shipper -> Buyer: deliver [in ID, in item, in address, out outcome]
-        Invia la notifica di avvenuta consegna al Buyer.
+        Invia la notifica di avvenuta consegna al Buyer generando outcome.
+        I parametri [in] (ID, item, address) vengono verificati e risolti dallo stato locale.
         """
-        in_params = {"ID": ID, "item": item, "address": address}
-        out_params = ["outcome"]
-        params = {**in_params, "outcome": outcome}
+        out_params = {"outcome": outcome}
 
-        # 1. Verifica di viabilità BSPL: ID, item, address devono essere noti da ship; outcome non deve essere noto
-        self.check_viability(ID, in_params=in_params, out_params=out_params, schema="deliver")
+        # 1. Verifica di viabilità LoST: risolve [in] (ID, item, address) e verifica che outcome non sia noto
+        in_params = self.check_viability(
+            ID,
+            in_param_names=["ID", "item", "address"],
+            out_params=out_params,
+        )
+
+        params = {**in_params, **out_params}
 
         # 2. Inserimento locale nella relazione R(deliver)
         self.insert_relation("deliver", ID, params)

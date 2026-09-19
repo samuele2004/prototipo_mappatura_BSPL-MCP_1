@@ -51,9 +51,10 @@ PurchaseWithDelivery {
    - **Buyer**: $R(rfq), R(quote), R(accept), R(reject), R(deliver)$
    - **Seller**: $R(rfq), R(quote), R(accept), R(reject), R(ship)$
    - **Shipper**: $R(ship), R(deliver)$
-2. **Controlli di Viabilità (Emissione)**:
-   - Parametri `[in]`: devono essere già vincolati localmente e avere valore coincidente.
+2. **Controlli di Viabilità LoST (Emissione)**:
+   - Parametri `[in]`: devono essere già vincolati localmente e vengono automaticamente risolti dalle relazioni locali del nodo. Il chiamante passa a `send_*` unicamente la chiave `ID` e i parametri `[out]` generati.
    - Parametri `[out]`: non devono essere già vincolati per quell'ID. La mutua esclusione tra `accept` e `reject` è garantita dalla non-riassegnabilità del parametro `response`.
+   - Parametri `[nil]`: se dichiarati nello schema, viene verificato che non siano vincolati nello stato locale per quell'ID.
 3. **Controlli di Consistenza e Idempotenza (Ricezione Tool)**:
    - Consistenza: se un parametro ricevuto è già noto nello stato locale, il valore deve essere identico. In caso di discrepanza viene sollevata una `BSPLConsistencyError` che l'SDK MCP restituisce come risposta con `is_error=True`.
    - Idempotenza: messaggi duplicati identici vengono riconosciuti e accettati senza duplicare tuple né scatenare eventi ridondanti.
@@ -64,14 +65,14 @@ PurchaseWithDelivery {
 
 ## 3. Tabella dei Messaggi, Tool e Metodi Send
 
-| Messaggio BSPL | Mittente | Ricevente | Tool MCP (Ricevente) | Metodo Send (Mittente) | Parametri |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| `Buyer -> Seller: rfq` | Buyer | Seller | `rfq` | `buyer.send_rfq(...)` | `ID: [out key]`, `item: [out]` |
-| `Seller -> Buyer: quote` | Seller | Buyer | `quote` | `seller.send_quote(...)` | `ID: [in key]`, `item: [in]`, `price: [out]` |
-| `Buyer -> Seller: accept` | Buyer | Seller | `accept` | `buyer.send_accept(...)` | `ID: [in key]`, `item: [in]`, `price: [in]`, `address: [out]`, `response: [out]` |
-| `Buyer -> Seller: reject` | Buyer | Seller | `reject` | `buyer.send_reject(...)` | `ID: [in key]`, `item: [in]`, `price: [in]`, `outcome: [out]`, `response: [out]` |
-| `Seller -> Shipper: ship` | Seller | Shipper | `ship` | `seller.send_ship(...)` | `ID: [in key]`, `item: [in]`, `address: [in]` |
-| `Shipper -> Buyer: deliver` | Shipper | Buyer | `deliver` | `shipper.send_deliver(...)` | `ID: [in key]`, `item: [in]`, `address: [in]`, `outcome: [out]` |
+| Messaggio BSPL | Mittente | Ricevente | Tool MCP (Ricevente) | Metodo Send (Mittente) | Input Chiamante (`send_*`) | Parametri Risolti da Stato Locale (`[in]`) |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| `Buyer -> Seller: rfq` | Buyer | Seller | `rfq` | `buyer.send_rfq(ID, item)` | `ID: [out key]`, `item: [out]` | *(nessuno)* |
+| `Seller -> Buyer: quote` | Seller | Buyer | `quote` | `seller.send_quote(ID, price)` | `price: [out]` | `ID: [in key]`, `item: [in]` |
+| `Buyer -> Seller: accept` | Buyer | Seller | `accept` | `buyer.send_accept(ID, address, response)` | `address: [out]`, `response: [out]` | `ID: [in key]`, `item: [in]`, `price: [in]` |
+| `Buyer -> Seller: reject` | Buyer | Seller | `reject` | `buyer.send_reject(ID, outcome, response)` | `outcome: [out]`, `response: [out]` | `ID: [in key]`, `item: [in]`, `price: [in]` |
+| `Seller -> Shipper: ship` | Seller | Shipper | `ship` | `seller.send_ship(ID)` | *(nessuno)* | `ID: [in key]`, `item: [in]`, `address: [in]` |
+| `Shipper -> Buyer: deliver` | Shipper | Buyer | `deliver` | `shipper.send_deliver(ID, outcome)` | `outcome: [out]` | `ID: [in key]`, `item: [in]`, `address: [in]` |
 
 ---
 

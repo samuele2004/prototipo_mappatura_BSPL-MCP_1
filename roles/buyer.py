@@ -13,8 +13,8 @@ Definizione del ruolo nel protocollo:
   * deliver(ID, item, address, outcome) [Shipper -> Buyer: deliver]
 - EMISSIONE (Metodi pubblici per l'invio messaggi via Client MCP):
   * send_rfq(ID, item) [Buyer -> Seller: rfq]
-  * send_accept(ID, item, price, address, response) [Buyer -> Seller: accept]
-  * send_reject(ID, item, price, outcome, response) [Buyer -> Seller: reject]
+  * send_accept(ID, address, response) [Buyer -> Seller: accept]
+  * send_reject(ID, outcome, response) [Buyer -> Seller: reject]
 """
 
 import asyncio
@@ -137,11 +137,12 @@ class BuyerNode(BaseRoleNode):
         Messaggio BSPL: Buyer -> Seller: rfq [out ID, out item]
         Invia una Request For Quote (RFQ) al Seller generando ID e item.
         """
-        params = {"ID": ID, "item": item}
+        out_params = {"ID": ID, "item": item}
 
-        # 1. Verifica di viabilità BSPL: ID e item sono parametri out (non devono essere già noti)
-        self.check_viability(ID, in_params={}, out_params=["ID", "item"], schema="rfq")
+        # 1. Verifica di viabilità LoST: ID e item sono parametri out (non devono essere già noti)
+        self.check_viability(ID, in_param_names=[], out_params=out_params)
 
+        params = dict(out_params)
         # 2. Inserimento locale nella relazione R(rfq)
         self.insert_relation("rfq", ID, params)
 
@@ -162,21 +163,24 @@ class BuyerNode(BaseRoleNode):
     async def send_accept(
         self,
         ID: str,
-        item: str,
-        price: float,
         address: str,
         response: str = "accepted"
     ):
         """
         Messaggio BSPL: Buyer -> Seller: accept [in ID, in item, in price, out address, out response]
-        Invia l'accettazione dell'offerta al Seller con l'indirizzo di spedizione.
+        Invia l'accettazione dell'offerta al Seller generando address e response.
+        I parametri [in] (ID, item, price) vengono verificati e risolti dallo stato locale.
         """
-        in_params = {"ID": ID, "item": item, "price": price}
-        out_params = ["address", "response"]
-        params = {**in_params, "address": address, "response": response}
+        out_params = {"address": address, "response": response}
 
-        # 1. Verifica di viabilità BSPL: ID, item, price devono essere noti; address e response non devono essere noti
-        self.check_viability(ID, in_params=in_params, out_params=out_params, schema="accept")
+        # 1. Verifica di viabilità LoST: risolve [in] (ID, item, price) e verifica che out non siano noti
+        in_params = self.check_viability(
+            ID,
+            in_param_names=["ID", "item", "price"],
+            out_params=out_params,
+        )
+
+        params = {**in_params, **out_params}
 
         # 2. Inserimento locale nella relazione R(accept)
         self.insert_relation("accept", ID, params)
@@ -199,21 +203,24 @@ class BuyerNode(BaseRoleNode):
     async def send_reject(
         self,
         ID: str,
-        item: str,
-        price: float,
         outcome: str = "rejected",
         response: str = "rejected"
     ):
         """
         Messaggio BSPL: Buyer -> Seller: reject [in ID, in item, in price, out outcome, out response]
-        Invia il rifiuto dell'offerta al Seller.
+        Invia il rifiuto dell'offerta al Seller generando outcome e response.
+        I parametri [in] (ID, item, price) vengono verificati e risolti dallo stato locale.
         """
-        in_params = {"ID": ID, "item": item, "price": price}
-        out_params = ["outcome", "response"]
-        params = {**in_params, "outcome": outcome, "response": response}
+        out_params = {"outcome": outcome, "response": response}
 
-        # 1. Verifica di viabilità BSPL: ID, item, price devono essere noti; outcome e response non devono essere noti
-        self.check_viability(ID, in_params=in_params, out_params=out_params, schema="reject")
+        # 1. Verifica di viabilità LoST: risolve [in] (ID, item, price) e verifica che out non siano noti
+        in_params = self.check_viability(
+            ID,
+            in_param_names=["ID", "item", "price"],
+            out_params=out_params,
+        )
+
+        params = {**in_params, **out_params}
 
         # 2. Inserimento locale nella relazione R(reject)
         self.insert_relation("reject", ID, params)

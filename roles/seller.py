@@ -13,8 +13,8 @@ Definizione del ruolo nel protocollo:
   * accept(ID, item, price, address, response) [Buyer -> Seller: accept]
   * reject(ID, item, price, outcome, response) [Buyer -> Seller: reject]
 - EMISSIONE (Metodi pubblici per l'invio messaggi via Client MCP):
-  * send_quote(ID, item, price) [Seller -> Buyer: quote]
-  * send_ship(ID, item, address) [Seller -> Shipper: ship]
+  * send_quote(ID, price) [Seller -> Buyer: quote]
+  * send_ship(ID) [Seller -> Shipper: ship]
 """
 
 import asyncio
@@ -181,17 +181,22 @@ class SellerNode(BaseRoleNode):
     # Metodi Pubblici di Invio (Emissione messaggi BSPL tramite Client MCP)
     # ----------------------------------------------------------------------
 
-    async def send_quote(self, ID: str, item: str, price: float):
+    async def send_quote(self, ID: str, price: float):
         """
         Messaggio BSPL: Seller -> Buyer: quote [in ID, in item, out price]
-        Invia la quotazione di prezzo al Buyer.
+        Invia la quotazione di prezzo al Buyer generando price.
+        I parametri [in] (ID, item) vengono verificati e risolti dallo stato locale.
         """
-        in_params = {"ID": ID, "item": item}
-        out_params = ["price"]
-        params = {**in_params, "price": price}
+        out_params = {"price": price}
 
-        # 1. Verifica di viabilità BSPL: ID e item devono essere già noti; price non deve essere noto
-        self.check_viability(ID, in_params=in_params, out_params=out_params, schema="quote")
+        # 1. Verifica di viabilità LoST: risolve [in] (ID, item) e verifica che price non sia già vincolato
+        in_params = self.check_viability(
+            ID,
+            in_param_names=["ID", "item"],
+            out_params=out_params,
+        )
+
+        params = {**in_params, **out_params}
 
         # 2. Inserimento locale nella relazione R(quote)
         self.insert_relation("quote", ID, params)
@@ -211,23 +216,26 @@ class SellerNode(BaseRoleNode):
             self.remove_relation("quote", ID)
             raise
 
-    async def send_ship(self, ID: str, item: str, address: str):
+    async def send_ship(self, ID: str):
         """
         Messaggio BSPL: Seller -> Shipper: ship [in ID, in item, in address]
         Invia l'ordine di spedizione allo Shipper.
+        Tutti i parametri sono [in] (ID, item, address) e vengono verificati e risolti dallo stato locale.
         """
-        in_params = {"ID": ID, "item": item, "address": address}
-        out_params: list[str] = []
-        params = dict(in_params)
+        # 1. Verifica di viabilità LoST: verifica che ID, item e address siano già noti localmente
+        in_params = self.check_viability(
+            ID,
+            in_param_names=["ID", "item", "address"],
+            out_params={},
+        )
 
-        # 1. Verifica di viabilità BSPL: tutti i parametri sono [in] e devono essere già noti (da rfq e accept)
-        self.check_viability(ID, in_params=in_params, out_params=out_params, schema="ship")
+        params = dict(in_params)
 
         # 2. Inserimento locale nella relazione R(ship)
         self.insert_relation("ship", ID, params)
 
         await asyncio.sleep(0.05)
-        logger.info(f"[Seller -> Shipper] Invocazione Tool 'ship': ID={ID!r}, address={address!r}")
+        logger.info(f"[Seller -> Shipper] Invocazione Tool 'ship': ID={ID!r}, address={params.get('address')!r}")
         try:
             async with Client(SHIPPER_URL) as client:
                 result = await client.call_tool("ship", params)

@@ -6,7 +6,7 @@ Include test per:
 2. Scenario alternativo con rifiuto (Reject) e non coinvolgimento dello Shipper
 3. Concorrenza e isolamento dello stato tra transazioni multiple indipendenti
 4. Validazione degli schemi sintattici tramite JSON Schema / Pydantic di MCP
-5. Enforcement delle regole di viabilità in emissione (BSPLViabilityError)
+5. Enforcement delle regole di viabilità LoST in emissione (in, out, nil)
 6. Enforcement della consistenza semantica e immutabilità in ricezione (is_error=True)
 7. Gestione dell'idempotenza su messaggi duplicati
 """
@@ -58,24 +58,24 @@ async def test_purchase_happy_path(running_environment):
     price = 1500.0
     address = "Via Roma 10, 20121 Milano, Italia"
 
-    # 1. Buyer -> Seller: rfq
+    # 1. Buyer -> Seller: rfq (out ID, out item)
     await buyer.send_rfq(ID=tx_id, item=item)
 
-    # 2. Seller -> Buyer: quote
+    # 2. Seller -> Buyer: quote (in ID, in item, out price)
     await seller.wait_for_message("rfq", tx_id)
-    await seller.send_quote(ID=tx_id, item=item, price=price)
+    await seller.send_quote(ID=tx_id, price=price)
 
-    # 3. Buyer -> Seller: accept
+    # 3. Buyer -> Seller: accept (in ID, in item, in price, out address, out response)
     await buyer.wait_for_message("quote", tx_id)
-    await buyer.send_accept(ID=tx_id, item=item, price=price, address=address, response="accepted")
+    await buyer.send_accept(ID=tx_id, address=address, response="accepted")
 
-    # 4. Seller -> Shipper: ship
+    # 4. Seller -> Shipper: ship (in ID, in item, in address)
     await seller.wait_for_message("accept", tx_id)
-    await seller.send_ship(ID=tx_id, item=item, address=address)
+    await seller.send_ship(ID=tx_id)
 
-    # 5. Shipper -> Buyer: deliver
+    # 5. Shipper -> Buyer: deliver (in ID, in item, in address, out outcome)
     await shipper.wait_for_message("ship", tx_id)
-    await shipper.send_deliver(ID=tx_id, item=item, address=address, outcome="delivered")
+    await shipper.send_deliver(ID=tx_id, outcome="delivered")
 
     # 6. Attesa ricezione consegna su Buyer
     await buyer.wait_for_message("deliver", tx_id)
@@ -115,11 +115,11 @@ async def test_purchase_reject_path(running_environment):
 
     # 2. Seller -> Buyer: quote
     await seller.wait_for_message("rfq", tx_id)
-    await seller.send_quote(ID=tx_id, item=item, price=price)
+    await seller.send_quote(ID=tx_id, price=price)
 
     # 3. Buyer decide di rifiutare ed invia 'reject' al Seller
     await buyer.wait_for_message("quote", tx_id)
-    await buyer.send_reject(ID=tx_id, item=item, price=price, outcome="rejected", response="rejected")
+    await buyer.send_reject(ID=tx_id, outcome="rejected", response="rejected")
 
     # 4. Seller attende il rifiuto
     await seller.wait_for_message("reject", tx_id)
@@ -150,13 +150,13 @@ async def test_concurrent_transactions_isolation(running_environment):
     async def execute_transaction(tx_id, item, price, address):
         await buyer.send_rfq(ID=tx_id, item=item)
         await seller.wait_for_message("rfq", tx_id)
-        await seller.send_quote(ID=tx_id, item=item, price=price)
+        await seller.send_quote(ID=tx_id, price=price)
         await buyer.wait_for_message("quote", tx_id)
-        await buyer.send_accept(ID=tx_id, item=item, price=price, address=address, response="accepted")
+        await buyer.send_accept(ID=tx_id, address=address, response="accepted")
         await seller.wait_for_message("accept", tx_id)
-        await seller.send_ship(ID=tx_id, item=item, address=address)
+        await seller.send_ship(ID=tx_id)
         await shipper.wait_for_message("ship", tx_id)
-        await shipper.send_deliver(ID=tx_id, item=item, address=address, outcome="delivered")
+        await shipper.send_deliver(ID=tx_id, outcome="delivered")
         await buyer.wait_for_message("deliver", tx_id)
 
     # Esecuzione in parallelo delle 3 transazioni
@@ -188,38 +188,38 @@ async def test_tool_schema_validation(running_environment):
 
 @pytest.mark.asyncio
 async def test_viability_emission_check(running_environment):
-    """Verifica l'enforcement delle regole di viabilità BSPL in fase di emissione."""
+    """Verifica l'enforcement delle regole di viabilità BSPL in fase di emissione (in, out, nil)."""
     buyer, seller, shipper = running_environment
     tx_id = "TEST-VIABILITY-01"
     item = "Test Phone"
 
     # 1. Tentativo illegale: Seller prova ad inviare Quote senza aver prima ricevuto RFQ
+    # (manca il parametro in 'item' nello stato locale del Seller)
     with pytest.raises(BSPLViabilityError) as exc_info:
-        await seller.send_quote(ID=tx_id, item=item, price=300.0)
+        await seller.send_quote(ID=tx_id, price=300.0)
     assert "non ancora noto" in str(exc_info.value)
+    assert any(param in str(exc_info.value) for param in ["ID", "item"])
 
     # Ora eseguiamo regolarmente RFQ e Quote
     await buyer.send_rfq(ID=tx_id, item=item)
     await seller.wait_for_message("rfq", tx_id)
-    await seller.send_quote(ID=tx_id, item=item, price=300.0)
+    await seller.send_quote(ID=tx_id, price=300.0)
     await buyer.wait_for_message("quote", tx_id)
 
     # Buyer invia Accept (vincolando response="accepted")
-    await buyer.send_accept(ID=tx_id, item=item, price=300.0, address="Via Test 1", response="accepted")
+    await buyer.send_accept(ID=tx_id, address="Via Test 1", response="accepted")
 
     # 2. Tentativo illegale: Buyer prova a inviare Reject dopo aver già accettato (mutua esclusione su response)
     with pytest.raises(BSPLViabilityError) as exc_info2:
-        await buyer.send_reject(ID=tx_id, item=item, price=300.0, outcome="rejected", response="rejected")
+        await buyer.send_reject(ID=tx_id, outcome="rejected", response="rejected")
     assert "già vincolato" in str(exc_info2.value)
+    assert "response" in str(exc_info2.value)
 
-    # Seller riceve Accept e invia Ship
-    await seller.wait_for_message("accept", tx_id)
-    await seller.send_ship(ID=tx_id, item=item, address="Via Test 1")
-
-    # 3. Tentativo illegale: Seller prova a re-inviare Ship per la stessa transazione
+    # 3. Verifica controllo parametri [nil]: se un parametro nil è vincolato, l'emissione deve fallire
     with pytest.raises(BSPLViabilityError) as exc_info3:
-        await seller.send_ship(ID=tx_id, item=item, address="Via Test 1")
-    assert "già emesso" in str(exc_info3.value)
+        # simuliamo un controllo di viabilità con nil_params=["item"] (dove item è già noto)
+        buyer.check_viability(ID=tx_id, in_param_names=[], out_params={}, nil_params=["item"])
+    assert "parametro [nil]" in str(exc_info3.value)
 
 
 @pytest.mark.asyncio
@@ -233,7 +233,7 @@ async def test_consistency_reception_check(running_environment):
     # Prepariamo la transazione fino alla quotazione di 250.0
     await buyer.send_rfq(ID=tx_id, item=item)
     await seller.wait_for_message("rfq", tx_id)
-    await seller.send_quote(ID=tx_id, item=item, price=price)
+    await seller.send_quote(ID=tx_id, price=price)
     await buyer.wait_for_message("quote", tx_id)
 
     # Chiamata remota diretta non conforme: accept con prezzo alterato a 100.0 invece di 250.0

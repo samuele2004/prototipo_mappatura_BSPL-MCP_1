@@ -5,12 +5,13 @@ Questo script simula l'interazione tra i tre ruoli (Buyer, Seller, Shipper) seco
 il modello di mappatura a nodi ibridi (Modello 3 della tesi):
 1. Avvia i Server MCP dei tre nodi su trasporto Streamable HTTP (:8001, :8002, :8003).
 2. Coordina i passaggi della transazione invocando i metodi di invio pubblici dei ruoli
-   e sincronizzandosi sui messaggi ricevuti:
-   * Step 1: Buyer   --[rfq]-->     Seller
-   * Step 2: Seller  --[quote]-->   Buyer
-   * Step 3: Buyer   --[accept]-->  Seller
-   * Step 4: Seller  --[ship]-->    Shipper
-   * Step 5: Shipper --[deliver]--> Buyer
+   (passando solo la chiave ID e i parametri [out] generati, mentre i parametri [in]
+   sono risolti e verificati automaticamente dallo stato locale LoST):
+   * Step 1: Buyer   --[rfq(ID, item)]-------------------------> Seller
+   * Step 2: Seller  --[quote(ID, price)]----------------------> Buyer
+   * Step 3: Buyer   --[accept(ID, address, response)]---------> Seller
+   * Step 4: Seller  --[ship(ID)]------------------------------> Shipper
+   * Step 5: Shipper --[deliver(ID, outcome)]------------------> Buyer
 3. Ispeziona e stampa lo stato finale delle relazioni locali LoST R(m) di ciascun nodo.
 4. Convalida la consistenza dell'History Vector distribuito H = [H_Buyer, H_Seller, H_Shipper]
    e arresta i nodi in modo pulito.
@@ -60,6 +61,7 @@ async def run_choreography_scenario():
         # ------------------------------------------------------------------
         # FASE 1: Buyer invia RFQ al Seller
         # BSPL: Buyer -> Seller: rfq [out ID key, out item]
+        # In LoST il mittente fornisce la chiave e i parametri [out]
         # ------------------------------------------------------------------
         logger.info("-" * 75)
         logger.info(f"[FASE 1] Buyer emette RFQ: ID='{tx_id}', item='{item_name}'")
@@ -69,16 +71,18 @@ async def run_choreography_scenario():
         # ------------------------------------------------------------------
         # FASE 2: Seller riceve RFQ e invia Quote al Buyer
         # BSPL: Seller -> Buyer: quote [in ID key, in item, out price]
+        # Seller fornisce ID e out 'price'; 'item' è risolto dallo stato locale R(rfq)
         # ------------------------------------------------------------------
         await seller.wait_for_message("rfq", tx_id)
         logger.info("-" * 75)
         logger.info(f"[FASE 2] Seller ha ricevuto RFQ ed emette Quote: price={offered_price} EUR")
         logger.info("-" * 75)
-        await seller.send_quote(ID=tx_id, item=item_name, price=offered_price)
+        await seller.send_quote(ID=tx_id, price=offered_price)
 
         # ------------------------------------------------------------------
         # FASE 3: Buyer riceve Quote, accetta e invia Accept al Seller
         # BSPL: Buyer -> Seller: accept [in ID, in item, in price, out address, out response]
+        # Buyer fornisce out 'address' e 'response'; [in] 'item' e 'price' risolti da R(rfq) e R(quote)
         # ------------------------------------------------------------------
         await buyer.wait_for_message("quote", tx_id)
         logger.info("-" * 75)
@@ -86,8 +90,6 @@ async def run_choreography_scenario():
         logger.info("-" * 75)
         await buyer.send_accept(
             ID=tx_id,
-            item=item_name,
-            price=offered_price,
             address=delivery_address,
             response="accepted",
         )
@@ -95,16 +97,18 @@ async def run_choreography_scenario():
         # ------------------------------------------------------------------
         # FASE 4: Seller riceve Accept e invia Ship allo Shipper
         # BSPL: Seller -> Shipper: ship [in ID, in item, in address]
+        # Tutti i parametri sono [in], risolti dallo stato locale R(rfq) e R(accept)
         # ------------------------------------------------------------------
         await seller.wait_for_message("accept", tx_id)
         logger.info("-" * 75)
         logger.info("[FASE 4] Seller riceve Accept ed emette ordine di spedizione Ship allo Shipper")
         logger.info("-" * 75)
-        await seller.send_ship(ID=tx_id, item=item_name, address=delivery_address)
+        await seller.send_ship(ID=tx_id)
 
         # ------------------------------------------------------------------
         # FASE 5: Shipper riceve Ship e invia Deliver al Buyer
         # BSPL: Shipper -> Buyer: deliver [in ID, in item, in address, out outcome]
+        # Shipper fornisce out 'outcome'; [in] 'item' e 'address' risolti dallo stato locale R(ship)
         # ------------------------------------------------------------------
         await shipper.wait_for_message("ship", tx_id)
         logger.info("-" * 75)
@@ -112,8 +116,6 @@ async def run_choreography_scenario():
         logger.info("-" * 75)
         await shipper.send_deliver(
             ID=tx_id,
-            item=item_name,
-            address=delivery_address,
             outcome="delivered",
         )
 
