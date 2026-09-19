@@ -137,12 +137,11 @@ class BuyerNode(BaseRoleNode):
         Messaggio BSPL: Buyer -> Seller: rfq [out ID, out item]
         Invia una Request For Quote (RFQ) al Seller generando ID e item.
         """
-        out_params = {"ID": ID, "item": item}
-
         # 1. Verifica di viabilità LoST: ID e item sono parametri out (non devono essere già noti)
-        self.check_viability(ID, in_param_names=[], out_params=out_params)
+        self.check_viability(ID, in_params=[], out_params=["ID", "item"])
 
-        params = dict(out_params)
+        params = {"ID": ID, "item": item}
+
         # 2. Inserimento locale nella relazione R(rfq)
         self.insert_relation("rfq", ID, params)
 
@@ -171,16 +170,14 @@ class BuyerNode(BaseRoleNode):
         Invia l'accettazione dell'offerta al Seller generando address e response.
         I parametri [in] (ID, item, price) vengono verificati e risolti dallo stato locale.
         """
-        out_params = {"address": address, "response": response}
-
-        # 1. Verifica di viabilità LoST: risolve [in] (ID, item, price) e verifica che out non siano noti
-        in_params = self.check_viability(
+        # 1. Verifica di viabilità LoST sui nomi dei parametri
+        in_values = self.check_viability(
             ID,
-            in_param_names=["ID", "item", "price"],
-            out_params=out_params,
+            in_params=["ID", "item", "price"],
+            out_params=["address", "response"],
         )
 
-        params = {**in_params, **out_params}
+        params = {**in_values, "address": address, "response": response}
 
         # 2. Inserimento locale nella relazione R(accept)
         self.insert_relation("accept", ID, params)
@@ -211,16 +208,14 @@ class BuyerNode(BaseRoleNode):
         Invia il rifiuto dell'offerta al Seller generando outcome e response.
         I parametri [in] (ID, item, price) vengono verificati e risolti dallo stato locale.
         """
-        out_params = {"outcome": outcome, "response": response}
-
-        # 1. Verifica di viabilità LoST: risolve [in] (ID, item, price) e verifica che out non siano noti
-        in_params = self.check_viability(
+        # 1. Verifica di viabilità LoST sui nomi dei parametri
+        in_values = self.check_viability(
             ID,
-            in_param_names=["ID", "item", "price"],
-            out_params=out_params,
+            in_params=["ID", "item", "price"],
+            out_params=["outcome", "response"],
         )
 
-        params = {**in_params, **out_params}
+        params = {**in_values, "outcome": outcome, "response": response}
 
         # 2. Inserimento locale nella relazione R(reject)
         self.insert_relation("reject", ID, params)

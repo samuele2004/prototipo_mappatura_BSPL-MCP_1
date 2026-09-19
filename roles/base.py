@@ -97,22 +97,22 @@ class BaseRoleNode:
     def check_viability(
         self,
         ID: str,
-        in_param_names: List[str],
-        out_params: Dict[str, Any],
+        in_params: List[str],
+        out_params: List[str],
         nil_params: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """
         Verifica le condizioni formali di viabilità LoST/BSPL per l'emissione di un messaggio:
-        1. Tutti i parametri [in] devono risultare già vincolati nelle relazioni locali per ID.
-        2. Nessun parametro [out] deve risultare già vincolato per la chiave ID (assioma di immutabilità).
-        3. Nessun parametro [nil] deve risultare già vincolato per la chiave ID.
+        1. Tutti i parametri in_params devono risultare già vincolati nelle relazioni locali per ID.
+        2. Nessun parametro out_params deve risultare già vincolato per la chiave ID (assioma di immutabilità).
+        3. Nessun parametro nil_params deve risultare già vincolato per la chiave ID.
 
-        Ritorna il dizionario dei parametri [in] risolti dallo stato locale.
+        Ritorna il dizionario dei parametri [in] risolti dallo stato locale: { param_name: param_value }.
         """
         resolved_in_params: Dict[str, Any] = {}
 
         # 1. Verifica e recupero parametri [in] dallo stato locale
-        for param in in_param_names:
+        for param in in_params:
             if not self.has_known_parameter(param, ID):
                 raise BSPLViabilityError(
                     f"[{self.name}] Emissione non viabile: parametro [in] '{param}' non ancora noto per ID='{ID}'"

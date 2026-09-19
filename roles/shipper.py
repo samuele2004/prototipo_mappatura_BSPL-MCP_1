@@ -94,16 +94,14 @@ class ShipperNode(BaseRoleNode):
         Invia la notifica di avvenuta consegna al Buyer generando outcome.
         I parametri [in] (ID, item, address) vengono verificati e risolti dallo stato locale.
         """
-        out_params = {"outcome": outcome}
-
-        # 1. Verifica di viabilità LoST: risolve [in] (ID, item, address) e verifica che outcome non sia noto
-        in_params = self.check_viability(
+        # 1. Verifica di viabilità LoST sui nomi dei parametri
+        in_values = self.check_viability(
             ID,
-            in_param_names=["ID", "item", "address"],
-            out_params=out_params,
+            in_params=["ID", "item", "address"],
+            out_params=["outcome"],
         )
 
-        params = {**in_params, **out_params}
+        params = {**in_values, "outcome": outcome}
 
         # 2. Inserimento locale nella relazione R(deliver)
         self.insert_relation("deliver", ID, params)

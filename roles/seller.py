@@ -187,16 +187,14 @@ class SellerNode(BaseRoleNode):
         Invia la quotazione di prezzo al Buyer generando price.
         I parametri [in] (ID, item) vengono verificati e risolti dallo stato locale.
         """
-        out_params = {"price": price}
-
-        # 1. Verifica di viabilità LoST: risolve [in] (ID, item) e verifica che price non sia già vincolato
-        in_params = self.check_viability(
+        # 1. Verifica di viabilità LoST sui nomi dei parametri
+        in_values = self.check_viability(
             ID,
-            in_param_names=["ID", "item"],
-            out_params=out_params,
+            in_params=["ID", "item"],
+            out_params=["price"],
         )
 
-        params = {**in_params, **out_params}
+        params = {**in_values, "price": price}
 
         # 2. Inserimento locale nella relazione R(quote)
         self.insert_relation("quote", ID, params)
@@ -222,14 +220,14 @@ class SellerNode(BaseRoleNode):
         Invia l'ordine di spedizione allo Shipper.
         Tutti i parametri sono [in] (ID, item, address) e vengono verificati e risolti dallo stato locale.
         """
-        # 1. Verifica di viabilità LoST: verifica che ID, item e address siano già noti localmente
-        in_params = self.check_viability(
+        # 1. Verifica di viabilità LoST sui nomi dei parametri
+        in_values = self.check_viability(
             ID,
-            in_param_names=["ID", "item", "address"],
-            out_params={},
+            in_params=["ID", "item", "address"],
+            out_params=[],
         )
 
-        params = dict(in_params)
+        params = dict(in_values)
 
         # 2. Inserimento locale nella relazione R(ship)
         self.insert_relation("ship", ID, params)
