@@ -12,7 +12,8 @@ il modello di mappatura a nodi ibridi (Modello 3 della tesi):
    * Step 4: Seller  --[ship]-->    Shipper
    * Step 5: Shipper --[deliver]--> Buyer
 3. Ispeziona e stampa lo stato finale delle relazioni locali LoST R(m) di ciascun nodo.
-4. Convalida la consistenza dell'history vector distribuito e arresta i nodi.
+4. Convalida la consistenza dell'History Vector distribuito H = [H_Buyer, H_Seller, H_Shipper]
+   e arresta i nodi in modo pulito.
 """
 
 import asyncio
@@ -140,6 +141,17 @@ async def run_choreography_scenario():
         print("\n[SHIPPER RELATIONS]:")
         for rel_name, table in shipper.relations.items():
             print(f"  R({rel_name}): {json.dumps(table.get(tx_id, {}), ensure_ascii=False)}")
+        print("=" * 75)
+
+        # ------------------------------------------------------------------
+        # History Vector Distribuito H = [H_Buyer, H_Seller, H_Shipper]
+        # ------------------------------------------------------------------
+        print("\n" + "=" * 75)
+        print(f"  HISTORY VECTOR DISTRIBUITO H = [H_Buyer, H_Seller, H_Shipper] (ID='{tx_id}')")
+        print("=" * 75)
+        print(f"  H_Buyer:   {list(buyer.get_history(tx_id).keys())}")
+        print(f"  H_Seller:  {list(seller.get_history(tx_id).keys())}")
+        print(f"  H_Shipper: {list(shipper.get_history(tx_id).keys())}")
         print("=" * 75 + "\n")
 
         # ------------------------------------------------------------------

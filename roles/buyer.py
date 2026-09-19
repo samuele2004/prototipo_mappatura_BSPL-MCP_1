@@ -140,19 +140,24 @@ class BuyerNode(BaseRoleNode):
         params = {"ID": ID, "item": item}
 
         # 1. Verifica di viabilità BSPL: ID e item sono parametri out (non devono essere già noti)
-        self.check_viability(ID, in_params={}, out_params=["ID", "item"])
+        self.check_viability(ID, in_params={}, out_params=["ID", "item"], schema="rfq")
 
         # 2. Inserimento locale nella relazione R(rfq)
         self.insert_relation("rfq", ID, params)
 
         logger.info(f"[Buyer -> Seller] Invocazione Tool 'rfq': ID={ID!r}, item={item!r}")
-        async with Client(SELLER_URL) as client:
-            result = await client.call_tool("rfq", params)
-            if result.is_error:
-                error_msg = str(result.content)
-                logger.error(f"❌ [Buyer] Errore dal server Seller su 'rfq': {error_msg}")
-                raise BSPLExecutionError(f"Errore remoto su 'rfq': {error_msg}")
-            logger.info(f"[Buyer] Risposta per 'rfq': {result.content}")
+        try:
+            async with Client(SELLER_URL) as client:
+                result = await client.call_tool("rfq", params)
+                if result.is_error:
+                    error_msg = str(result.content)
+                    logger.error(f"❌ [Buyer] Errore dal server Seller su 'rfq': {error_msg}")
+                    self.remove_relation("rfq", ID)
+                    raise BSPLExecutionError(f"Errore remoto su 'rfq': {error_msg}")
+                logger.info(f"[Buyer] Risposta per 'rfq': {result.content}")
+        except Exception:
+            self.remove_relation("rfq", ID)
+            raise
 
     async def send_accept(
         self,
@@ -171,20 +176,25 @@ class BuyerNode(BaseRoleNode):
         params = {**in_params, "address": address, "response": response}
 
         # 1. Verifica di viabilità BSPL: ID, item, price devono essere noti; address e response non devono essere noti
-        self.check_viability(ID, in_params=in_params, out_params=out_params)
+        self.check_viability(ID, in_params=in_params, out_params=out_params, schema="accept")
 
         # 2. Inserimento locale nella relazione R(accept)
         self.insert_relation("accept", ID, params)
 
         await asyncio.sleep(0.05)
         logger.info(f"[Buyer -> Seller] Invocazione Tool 'accept': ID={ID!r}, address={address!r}, response={response!r}")
-        async with Client(SELLER_URL) as client:
-            result = await client.call_tool("accept", params)
-            if result.is_error:
-                error_msg = str(result.content)
-                logger.error(f"❌ [Buyer] Errore dal server Seller su 'accept': {error_msg}")
-                raise BSPLExecutionError(f"Errore remoto su 'accept': {error_msg}")
-            logger.info(f"[Buyer] Risposta per 'accept': {result.content}")
+        try:
+            async with Client(SELLER_URL) as client:
+                result = await client.call_tool("accept", params)
+                if result.is_error:
+                    error_msg = str(result.content)
+                    logger.error(f"❌ [Buyer] Errore dal server Seller su 'accept': {error_msg}")
+                    self.remove_relation("accept", ID)
+                    raise BSPLExecutionError(f"Errore remoto su 'accept': {error_msg}")
+                logger.info(f"[Buyer] Risposta per 'accept': {result.content}")
+        except Exception:
+            self.remove_relation("accept", ID)
+            raise
 
     async def send_reject(
         self,
@@ -203,17 +213,22 @@ class BuyerNode(BaseRoleNode):
         params = {**in_params, "outcome": outcome, "response": response}
 
         # 1. Verifica di viabilità BSPL: ID, item, price devono essere noti; outcome e response non devono essere noti
-        self.check_viability(ID, in_params=in_params, out_params=out_params)
+        self.check_viability(ID, in_params=in_params, out_params=out_params, schema="reject")
 
         # 2. Inserimento locale nella relazione R(reject)
         self.insert_relation("reject", ID, params)
 
         await asyncio.sleep(0.05)
         logger.info(f"[Buyer -> Seller] Invocazione Tool 'reject': ID={ID!r}, outcome={outcome!r}, response={response!r}")
-        async with Client(SELLER_URL) as client:
-            result = await client.call_tool("reject", params)
-            if result.is_error:
-                error_msg = str(result.content)
-                logger.error(f"❌ [Buyer] Errore dal server Seller su 'reject': {error_msg}")
-                raise BSPLExecutionError(f"Errore remoto su 'reject': {error_msg}")
-            logger.info(f"[Buyer] Risposta per 'reject': {result.content}")
+        try:
+            async with Client(SELLER_URL) as client:
+                result = await client.call_tool("reject", params)
+                if result.is_error:
+                    error_msg = str(result.content)
+                    logger.error(f"❌ [Buyer] Errore dal server Seller su 'reject': {error_msg}")
+                    self.remove_relation("reject", ID)
+                    raise BSPLExecutionError(f"Errore remoto su 'reject': {error_msg}")
+                logger.info(f"[Buyer] Risposta per 'reject': {result.content}")
+        except Exception:
+            self.remove_relation("reject", ID)
+            raise

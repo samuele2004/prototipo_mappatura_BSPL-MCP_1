@@ -71,7 +71,7 @@ class SellerNode(BaseRoleNode):
 
         @self.server.tool()
         async def rfq(
-            ID: Annotated[str, Field(description="[BSPL: in key] Identificativo univoco della transazione")],
+            ID: Annotated[str, Field(description="[BSPL: out key] Identificativo univoco della transazione generato dal Buyer")],
             item: Annotated[str, Field(description="[BSPL: out] Articolo richiesto dal Buyer")],
         ) -> str:
             """
@@ -191,20 +191,25 @@ class SellerNode(BaseRoleNode):
         params = {**in_params, "price": price}
 
         # 1. Verifica di viabilità BSPL: ID e item devono essere già noti; price non deve essere noto
-        self.check_viability(ID, in_params=in_params, out_params=out_params)
+        self.check_viability(ID, in_params=in_params, out_params=out_params, schema="quote")
 
         # 2. Inserimento locale nella relazione R(quote)
         self.insert_relation("quote", ID, params)
 
         await asyncio.sleep(0.05)
         logger.info(f"[Seller -> Buyer] Invocazione Tool 'quote': ID={ID!r}, price={price}")
-        async with Client(BUYER_URL) as client:
-            result = await client.call_tool("quote", params)
-            if result.is_error:
-                error_msg = str(result.content)
-                logger.error(f"❌ [Seller] Errore dal server Buyer su 'quote': {error_msg}")
-                raise BSPLExecutionError(f"Errore remoto su 'quote': {error_msg}")
-            logger.info(f"[Seller] Risposta per 'quote': {result.content}")
+        try:
+            async with Client(BUYER_URL) as client:
+                result = await client.call_tool("quote", params)
+                if result.is_error:
+                    error_msg = str(result.content)
+                    logger.error(f"❌ [Seller] Errore dal server Buyer su 'quote': {error_msg}")
+                    self.remove_relation("quote", ID)
+                    raise BSPLExecutionError(f"Errore remoto su 'quote': {error_msg}")
+                logger.info(f"[Seller] Risposta per 'quote': {result.content}")
+        except Exception:
+            self.remove_relation("quote", ID)
+            raise
 
     async def send_ship(self, ID: str, item: str, address: str):
         """
@@ -216,17 +221,22 @@ class SellerNode(BaseRoleNode):
         params = dict(in_params)
 
         # 1. Verifica di viabilità BSPL: tutti i parametri sono [in] e devono essere già noti (da rfq e accept)
-        self.check_viability(ID, in_params=in_params, out_params=out_params)
+        self.check_viability(ID, in_params=in_params, out_params=out_params, schema="ship")
 
         # 2. Inserimento locale nella relazione R(ship)
         self.insert_relation("ship", ID, params)
 
         await asyncio.sleep(0.05)
         logger.info(f"[Seller -> Shipper] Invocazione Tool 'ship': ID={ID!r}, address={address!r}")
-        async with Client(SHIPPER_URL) as client:
-            result = await client.call_tool("ship", params)
-            if result.is_error:
-                error_msg = str(result.content)
-                logger.error(f"❌ [Seller] Errore dal server Shipper su 'ship': {error_msg}")
-                raise BSPLExecutionError(f"Errore remoto su 'ship': {error_msg}")
-            logger.info(f"[Seller] Risposta per 'ship': {result.content}")
+        try:
+            async with Client(SHIPPER_URL) as client:
+                result = await client.call_tool("ship", params)
+                if result.is_error:
+                    error_msg = str(result.content)
+                    logger.error(f"❌ [Seller] Errore dal server Shipper su 'ship': {error_msg}")
+                    self.remove_relation("ship", ID)
+                    raise BSPLExecutionError(f"Errore remoto su 'ship': {error_msg}")
+                logger.info(f"[Seller] Risposta per 'ship': {result.content}")
+        except Exception:
+            self.remove_relation("ship", ID)
+            raise

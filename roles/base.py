@@ -5,9 +5,10 @@ Incapsula:
 - Il ciclo di vita del Server MCP su trasporto Streamable HTTP (uvicorn).
 - La gestione dello stato locale relazionale secondo il modello LoST (Local State Transfer):
   relazioni separate R(m) per ciascuno schema di messaggio m.
-- Le regole formali di viabilità per l'emissione dei messaggi.
+- Le regole formali di viabilità per l'emissione dei messaggi (verifica parametri [in] e [out]).
 - I controlli di consistenza semantica (immutabilità BSPL) e idempotenza (duplicati) in ricezione.
 - La sincronizzazione asincrona reattiva per il coordinamento degli scenari.
+- L'estrazione della storia locale del ruolo per l'History Vector distribuito.
 """
 
 import asyncio
@@ -90,12 +91,24 @@ class BaseRoleNode:
                 return table[ID][param]
         return None
 
-    def check_viability(self, ID: str, in_params: Dict[str, Any], out_params: List[str]):
+    def check_viability(
+        self,
+        ID: str,
+        in_params: Dict[str, Any],
+        out_params: List[str],
+        schema: Optional[str] = None,
+    ):
         """
         Verifica le condizioni formali di viabilità per l'emissione di un messaggio:
-        1. Tutti i parametri [in] devono essere già vincolati localmente e avere valore coincidente.
-        2. Nessun parametro [out] deve risultare già vincolato per la chiave ID (assioma di immutabilità).
+        1. Il messaggio non deve essere già stato emesso per questa chiave ID.
+        2. Tutti i parametri [in] devono essere già vincolati localmente e avere valore coincidente.
+        3. Nessun parametro [out] deve risultare già vincolato per la chiave ID (assioma di immutabilità).
         """
+        if schema and ID in self.relations.get(schema, {}):
+            raise BSPLViabilityError(
+                f"[{self.name}] Emissione non viabile: messaggio '{schema}' già emesso per ID='{ID}'"
+            )
+
         for param, val in in_params.items():
             if not self.has_known_parameter(param, ID):
                 raise BSPLViabilityError(
@@ -146,9 +159,18 @@ class BaseRoleNode:
             self.relations[schema] = {}
         self.relations[schema][ID] = dict(params)
 
+    def remove_relation(self, schema: str, ID: str):
+        """
+        Rimuove una tupla da R(schema) in caso di errore durante la trasmissione (rollback locale).
+        """
+        if schema in self.relations and ID in self.relations[schema]:
+            del self.relations[schema][ID]
+
     def get_history(self, ID: str) -> Dict[str, Dict[str, Any]]:
         """
-        Restituisce la storia locale (le tuple delle relazioni locali popolate) per una data transazione.
+        Restituisce la storia locale H_x (le tuple delle relazioni locali popolate)
+        per una data transazione ID, corrispondente alla componente del ruolo
+        all'interno dell'History Vector H = [H_x1, ..., H_xn] (Cap. 1, Sez. 1.3.2).
         """
         return {
             schema: dict(table[ID])

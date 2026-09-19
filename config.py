@@ -1,8 +1,11 @@
 """
-Configurazione degli endpoint di rete per i ruoli della coreografia BSPL Purchase.
+Configurazione degli endpoint di rete per i nodi della coreografia BSPL PurchaseWithDelivery.
 
-In questa implementazione di esempio, gli indirizzi dei Server MCP di ciascun ruolo
-sono configurati staticamente (hardcoded) per simulare la scoperta dei nodi (Role Binding).
+In questa implementazione prototipale, gli indirizzi dei nodi ibridi MCP sono configurati
+staticamente (out-of-band) su localhost con porte dedicate su trasporto Streamable HTTP:
+- Buyer:   http://127.0.0.1:8001/mcp
+- Seller:  http://127.0.0.1:8002/mcp
+- Shipper: http://127.0.0.1:8003/mcp
 """
 
 BUYER_HOST = "127.0.0.1"

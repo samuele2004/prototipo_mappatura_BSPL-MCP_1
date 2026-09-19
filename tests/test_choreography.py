@@ -96,6 +96,11 @@ async def test_purchase_happy_path(running_environment):
     assert shipper.r_ship[tx_id] == {"ID": tx_id, "item": item, "address": address}
     assert shipper.r_deliver[tx_id]["outcome"] == "delivered"
 
+    # Verifica History Vector distribuito H = [H_Buyer, H_Seller, H_Shipper]
+    assert set(buyer.get_history(tx_id).keys()) == {"rfq", "quote", "accept", "deliver"}
+    assert set(seller.get_history(tx_id).keys()) == {"rfq", "quote", "accept", "ship"}
+    assert set(shipper.get_history(tx_id).keys()) == {"ship", "deliver"}
+
 
 @pytest.mark.asyncio
 async def test_purchase_reject_path(running_environment):
@@ -206,6 +211,15 @@ async def test_viability_emission_check(running_environment):
     with pytest.raises(BSPLViabilityError) as exc_info2:
         await buyer.send_reject(ID=tx_id, item=item, price=300.0, outcome="rejected", response="rejected")
     assert "già vincolato" in str(exc_info2.value)
+
+    # Seller riceve Accept e invia Ship
+    await seller.wait_for_message("accept", tx_id)
+    await seller.send_ship(ID=tx_id, item=item, address="Via Test 1")
+
+    # 3. Tentativo illegale: Seller prova a re-inviare Ship per la stessa transazione
+    with pytest.raises(BSPLViabilityError) as exc_info3:
+        await seller.send_ship(ID=tx_id, item=item, address="Via Test 1")
+    assert "già emesso" in str(exc_info3.value)
 
 
 @pytest.mark.asyncio

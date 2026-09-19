@@ -100,17 +100,22 @@ class ShipperNode(BaseRoleNode):
         params = {**in_params, "outcome": outcome}
 
         # 1. Verifica di viabilità BSPL: ID, item, address devono essere noti da ship; outcome non deve essere noto
-        self.check_viability(ID, in_params=in_params, out_params=out_params)
+        self.check_viability(ID, in_params=in_params, out_params=out_params, schema="deliver")
 
         # 2. Inserimento locale nella relazione R(deliver)
         self.insert_relation("deliver", ID, params)
 
         await asyncio.sleep(0.05)
         logger.info(f"[Shipper -> Buyer] Invocazione Tool 'deliver': ID={ID!r}, outcome={outcome!r}")
-        async with Client(BUYER_URL) as client:
-            result = await client.call_tool("deliver", params)
-            if result.is_error:
-                error_msg = str(result.content)
-                logger.error(f"❌ [Shipper] Errore dal server Buyer su 'deliver': {error_msg}")
-                raise BSPLExecutionError(f"Errore remoto su 'deliver': {error_msg}")
-            logger.info(f"[Shipper] Risposta per 'deliver': {result.content}")
+        try:
+            async with Client(BUYER_URL) as client:
+                result = await client.call_tool("deliver", params)
+                if result.is_error:
+                    error_msg = str(result.content)
+                    logger.error(f"❌ [Shipper] Errore dal server Buyer su 'deliver': {error_msg}")
+                    self.remove_relation("deliver", ID)
+                    raise BSPLExecutionError(f"Errore remoto su 'deliver': {error_msg}")
+                logger.info(f"[Shipper] Risposta per 'deliver': {result.content}")
+        except Exception:
+            self.remove_relation("deliver", ID)
+            raise
