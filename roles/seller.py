@@ -224,7 +224,6 @@ class SellerNode(BaseRoleNode):
         in_values = self.check_viability(
             ID,
             in_params=["ID", "item", "address"],
-            out_params=[],
         )
 
         params = dict(in_values)

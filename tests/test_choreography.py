@@ -218,7 +218,7 @@ async def test_viability_emission_check(running_environment):
     # 3. Verifica controllo parametri [nil]: se un parametro nil è vincolato, l'emissione deve fallire
     with pytest.raises(BSPLViabilityError) as exc_info3:
         # simuliamo un controllo di viabilità con nil_params=["item"] (dove item è già noto)
-        buyer.check_viability(ID=tx_id, in_params=[], out_params=[], nil_params=["item"])
+        buyer.check_viability(ID=tx_id, nil_params=["item"])
     assert "parametro [nil]" in str(exc_info3.value)
 
 

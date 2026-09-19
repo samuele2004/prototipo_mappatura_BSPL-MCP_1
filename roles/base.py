@@ -97,22 +97,28 @@ class BaseRoleNode:
     def check_viability(
         self,
         ID: str,
-        in_params: List[str],
-        out_params: List[str],
+        in_params: Optional[List[str]] = None,
+        out_params: Optional[List[str]] = None,
         nil_params: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """
         Verifica le condizioni formali di viabilità LoST/BSPL per l'emissione di un messaggio:
-        1. Tutti i parametri in_params devono risultare già vincolati nelle relazioni locali per ID.
-        2. Nessun parametro out_params deve risultare già vincolato per la chiave ID (assioma di immutabilità).
-        3. Nessun parametro nil_params deve risultare già vincolato per la chiave ID.
+        1. Tutti i parametri in_params (se presenti nello schema) devono risultare già vincolati
+           nelle relazioni locali per ID.
+        2. Nessun parametro out_params (se presente nello schema) deve risultare già vincolato
+           per la chiave ID (assioma di immutabilità).
+        3. Nessun parametro nil_params (se presente nello schema) deve risultare già vincolato
+           per la chiave ID.
+
+        Tutte le liste sono opzionali (nullabili) per rispecchiare schemi con soli parametri out,
+        soli parametri in o combinazioni parziali.
 
         Ritorna il dizionario dei parametri [in] risolti dallo stato locale: { param_name: param_value }.
         """
         resolved_in_params: Dict[str, Any] = {}
 
         # 1. Verifica e recupero parametri [in] dallo stato locale
-        for param in in_params:
+        for param in in_params or []:
             if not self.has_known_parameter(param, ID):
                 raise BSPLViabilityError(
                     f"[{self.name}] Emissione non viabile: parametro [in] '{param}' non ancora noto per ID='{ID}'"
@@ -120,7 +126,7 @@ class BaseRoleNode:
             resolved_in_params[param] = self.get_known_parameter(param, ID)
 
         # 2. Verifica che nessun parametro [out] sia già vincolato
-        for param in out_params:
+        for param in out_params or []:
             if self.has_known_parameter(param, ID):
                 known = self.get_known_parameter(param, ID)
                 raise BSPLViabilityError(

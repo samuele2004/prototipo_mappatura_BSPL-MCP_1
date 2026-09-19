@@ -138,7 +138,7 @@ class BuyerNode(BaseRoleNode):
         Invia una Request For Quote (RFQ) al Seller generando ID e item.
         """
         # 1. Verifica di viabilità LoST: ID e item sono parametri out (non devono essere già noti)
-        self.check_viability(ID, in_params=[], out_params=["ID", "item"])
+        self.check_viability(ID, out_params=["ID", "item"])
 
         params = {"ID": ID, "item": item}
 
