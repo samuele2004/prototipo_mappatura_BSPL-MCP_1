@@ -20,10 +20,16 @@ from typing import Any, Dict, List, Optional, Tuple
 import uvicorn
 from mcp.server import MCPServer
 
+try:
+    from mcp.server.mcpserver.exceptions import ToolError
+except ImportError:
+    class ToolError(Exception):  # type: ignore[no-redef]
+        pass
+
 logger = logging.getLogger("BaseRoleNode")
 
 
-class BSPLProtocolError(Exception):
+class BSPLProtocolError(ToolError):
     """Classe base per le eccezioni relative ai vincoli BSPL."""
     pass
 
