@@ -93,7 +93,79 @@ La \zcref{fig:architettura_ibrida} illustra visivamente la struttura del modello
 
 \subsection{Implementazione prototipale e caso di studio}\label{ibrida-prototipo}
 
-TODO sviluppare la sottosezione
+\subsubsection{Architettura del prototipo e gestione dello stato locale}\label{ibrida-architettura}
+
+Al fine di verificare la concreta fattibilità del modello di mappatura a nodi ibridi e di valutarne il comportamento sul piano applicativo, è stata sviluppata un'implementazione prototipale fondata sui principi del modello \emph{Local State Transfer}. Il prototipo assume come scenario di riferimento il protocollo \emph{PurchaseWithDelivery}, introdotto nella \zcref{lst:bspl_purchasewithdelivery}. Questa specifica modella un processo di compravendita distribuito che vede coinvolti tre partecipanti, identificati dai ruoli \textsc{Buyer}, \textsc{Seller} e \textsc{Shipper}. L'interazione è caratterizzata da dipendenze causali sequenziali e da una scelta locale non deterministica, in cui \textsc{Buyer} decide in modo autonomo se accettare o respingere l'offerta formulata da \textsc{Seller}.
+
+Sotto il profilo metodologico, il prototipo è concepito come una prova di concetto focalizzata sulla validazione delle regole causali e informative di BSPL sopra l'infrastruttura MCP, e non costituisce un interprete generico in grado di eseguire specifiche coreografiche arbitrarie. La struttura dei messaggi e i flussi di controllo sono codificati direttamente nei componenti software dei singoli ruoli. Inoltre, rispetto al quadro teorico completo delineato nella sezione precedente, l'implementazione introduce alcune semplificazioni volte a circoscrivere l'analisi alla corretta gestione dello stato locale. L'associazione tra i ruoli logici e i rispettivi endpoint di rete è definita staticamente in una configurazione condivisa, senza ricorrere a meccanismi dinamici di scoperta. Altresì, viene omessa la gestione avanzata dell'autenticazione tramite token o chiavi crittografiche nelle intestazioni HTTP, concentrando l'attenzione sui controlli di viabilità in fase di emissione, sulla verifica di consistenza in ricezione e sul trasporto dei carichi utili mediante l'invocazione di tool.
+
+Il prototipo è realizzato in linguaggio Python basandosi sulla versione 2 dell'SDK ufficiale per MCP e sul server ASGI \texttt{uvicorn}. Ciascun partecipante è strutturato come un nodo ibrido indipendente ed estende la classe astratta comune \lstinline|BaseRoleNode|. Questa classe racchiude le funzionalità fondamentali per la gestione del ciclo di vita del server MCP, la memorizzazione delle tabelle relazionali previste da LoST e i metodi di validazione formale dei vincoli del protocollo. La comunicazione poggia sul meccanismo di trasporto Streamable HTTP, all'interno del quale ogni nodo assegna al proprio server una porta TCP dedicata, impostata rispettivamente a 8001 per \textsc{Buyer}, 8002 per \textsc{Seller} e 8003 per \textsc{Shipper}. L'adozione di Streamable HTTP consente a ciascun server di accogliere invocazioni simultanee da parte di più interlocutori, superando i limiti di concorrenza propri della comunicazione su flussi standard.
+
+La \zcref{tab:ibrida_messaggi_tool} illustra la corrispondenza tra i messaggi definiti nella specifica, i ruoli coinvolti, i tool MCP predisposti per la ricezione e i metodi di invio implementati per l'emissione, distinguendo i parametri forniti dal chiamante da quelli risolti automaticamente dall'adattatore.
+
+\begin{table}[!ht]
+\centering
+\small
+\caption{Corrispondenza tra messaggi BSPL, primitive MCP e gestione dei parametri nel prototipo.}
+\label{tab:ibrida_messaggi_tool}
+\begin{adjustbox}{max width=\textwidth}
+\begin{tabular}{llllll}
+\toprule
+\textbf{Messaggio BSPL} & \textbf{Mittente $\to$ Ricevente} & \textbf{Tool MCP (Ricevente)} & \textbf{Metodo di invio (Mittente)} & \textbf{Parametri forniti (\adorn{out})} & \textbf{Parametri risolti (\adorn{in})} \\
+\midrule
+\lstinline|rfq| & \textsc{Buyer} $\to$ \textsc{Seller} & \lstinline|rfq| & \lstinline|send_rfq| & \texttt{ID}, \texttt{item} & nessuno \\
+\lstinline|quote| & \textsc{Seller} $\to$ \textsc{Buyer} & \lstinline|quote| & \lstinline|send_quote| & \texttt{price} & \texttt{ID}, \texttt{item} \\
+\lstinline|accept| & \textsc{Buyer} $\to$ \textsc{Seller} & \lstinline|accept| & \lstinline|send_accept| & \texttt{address}, \texttt{response} & \texttt{ID}, \texttt{item}, \texttt{price} \\
+\lstinline|reject| & \textsc{Buyer} $\to$ \textsc{Seller} & \lstinline|reject| & \lstinline|send_reject| & \texttt{outcome}, \texttt{response} & \texttt{ID}, \texttt{item}, \texttt{price} \\
+\lstinline|ship| & \textsc{Seller} $\to$ \textsc{Shipper} & \lstinline|ship| & \lstinline|send_ship| & nessuno & \texttt{ID}, \texttt{item}, \texttt{address} \\
+\lstinline|deliver| & \textsc{Shipper} $\to$ \textsc{Buyer} & \lstinline|deliver| & \lstinline|send_deliver| & \texttt{outcome} & \texttt{ID}, \texttt{item}, \texttt{address} \\
+\bottomrule
+\end{tabular}
+\end{adjustbox}
+\end{table}
+
+Come evidenziato nella tabella, il prototipo applica rigorosamente il principio di separazione delle responsabilità introdotto da LoST. Quando la logica di business di un ruolo richiede l'invio di un messaggio, essa invoca il corrispondente metodo di emissione passando unicamente la chiave di sessione \texttt{ID} e i parametri contrassegnati con l'adornamento \adorn{out}. L'adattatore locale verifica la presenza dei parametri \adorn{in} all'interno delle proprie relazioni, estraendone i valori in modo trasparente e componendo il carico utile completo da inoltrare al tool remoto del destinatario.
+
+All'interno di \lstinline|BaseRoleNode|, lo stato locale di ciascun ruolo è materializzato mediante una struttura dati relazionale, composta da una tabella $R(m)$ per ogni schema di messaggio $m$ in cui il ruolo è coinvolto. Ciascuna tabella associa il parametro chiave \texttt{ID} ai valori assunti dai parametri per quella specifica sessione. La correttezza dell'interazione è garantita da tre meccanismi di controllo, formalizzati nel \zcref{lst:controlli_lost}.
+
+In fase di emissione, l'adattatore esegue il metodo \lstinline|check_viability|. La funzione accerta innanzitutto che tutti i parametri contrassegnati come \adorn{in} risultino già noti nelle relazioni locali per la chiave fornita, procedendo alla loro estrazione. Successivamente, il metodo verifica che nessun parametro decorato con \adorn{out} o con \adorn{nil} sia già vincolato nello stato locale per la medesima transazione. In questo modo si garantisce che l'agente non emetta messaggi prima di disporre dei dati necessari e che non tenti di sovrascrivere valori già assegnati o parametri che devono restare indefiniti. Se uno di questi requisiti non è soddisfatto, viene sollevata un'eccezione \lstinline|BSPLViabilityError|, che blocca preventivamente l'operazione prima che la richiesta di rete sia trasmessa.
+
+In fase di ricezione, il messaggio recapitato al server MCP viene sottoposto a due livelli progressivi di verifica. Il primo livello è gestito nativamente dall'SDK tramite la convalida dell'input schema del tool, che controlla i tipi dei dati e la presenza dei campi obbligatori. Superata tale fase sintattica, l'adattatore esegue il metodo \lstinline|check_consistency| per validare la conformità semantica dei parametri ricevuti rispetto all'assioma di immutabilità di BSPL. Per ciascun parametro presente nel messaggio, l'adattatore confronta il valore in ingresso con quello eventualmente già memorizzato nelle relazioni locali per quella sessione. Se si riscontra una discrepanza, l'adattatore rigetta il messaggio sollevando un'eccezione \lstinline|BSPLConsistencyError|. Nel caso in cui la tupla sia consistente, il metodo \lstinline|is_duplicate| determina se la comunicazione costituisce una copia ridondante di un messaggio già elaborato, consentendo di assorbirla in modo idempotente. Se la tupla non è un duplicato, essa viene registrata stabilmente nella relazione locale $R(m)$ corrispondente.
+
+Per assicurare che l'infrastruttura MCP propaghi la natura semantica dell'errore al mittente, la classe \lstinline|BSPLProtocolError| eredita direttamente dalla classe \lstinline|ToolError| definita nell'SDK di MCP. Questa scelta fa sì che il framework non occulti l'eccezione dietro un messaggio diagnostico generico, ma restituisca al client chiamante una risposta JSON-RPC con l'attributo \lstinline|isError| impostato a \lstinline|true|, veicolando la spiegazione puntuale del conflitto all'interno del blocco di contenuto testuale.
+
+\begin{lstlisting}[language=Python, caption={Implementazione dei controlli di viabilità in emissione e di consistenza in ricezione nella classe \lstinline|BaseRoleNode|.}, label={lst:controlli_lost}]
+def check_viability(self, ID: str, in_params=None, out_params=None, nil_params=None):
+    resolved_in_params = {}
+    for param in in_params or []:
+        if not self.has_known_parameter(param, ID):
+            raise BSPLViabilityError(f"Parametro [in] '{param}' non ancora noto per ID='{ID}'")
+        resolved_in_params[param] = self.get_known_parameter(param, ID)
+
+    for param in out_params or []:
+        if self.has_known_parameter(param, ID):
+            raise BSPLViabilityError(f"Parametro [out] '{param}' gia' vincolato per ID='{ID}'")
+
+    for param in nil_params or []:
+        if self.has_known_parameter(param, ID):
+            raise BSPLViabilityError(f"Parametro [nil] '{param}' gia' vincolato per ID='{ID}'")
+
+    return resolved_in_params
+
+def check_consistency(self, ID: str, params: dict):
+    for param, val in params.items():
+        if self.has_known_parameter(param, ID):
+            known = self.get_known_parameter(param, ID)
+            if known != val:
+                raise BSPLConsistencyError(f"Inconsistenza per '{param}': ricevuto {val!r} != {known!r}")
+
+def is_duplicate(self, schema: str, ID: str, params: dict) -> bool:
+    table = self.relations.get(schema, {})
+    return ID in table and table[ID] == params
+\end{lstlisting}
+
+% TODO Step 2: \subsubsection{Meccanica di scambio del messaggio di quotazione}
+% TODO Step 3: \subsubsection{Tracce di esecuzione e gestione delle anomalie}
 
 \subsection{Valutazione e limiti del modello}\label{ibrida-valutazione}
 
