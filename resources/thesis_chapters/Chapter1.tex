@@ -1,0 +1,1444 @@
+\chapter{Background}
+\label{chap:1}
+
+\section{Il Model Context Protocol}\label{introduzione-su-mcp}
+
+L'inserimento dei Large Language Models nei flussi di lavoro è stato
+storicamente limitato dalla frammentazione delle connessioni alle fonti
+di dati esterne. Prima della diffusione del Model Context Protocol (MCP) 
+\autocite{hasan2026modelcontextprotocolmcp}, l'implementazione di un agente 
+AI richiedeva lo sviluppo di integrazioni su misura per le API di ogni 
+singolo servizio a cui il modello doveva accedere. Seguendo questo approccio, 
+all'aumentare dei servizi integrati, le applicazioni AI diventavano molto 
+complesse e fortemente accoppiate, e di conseguenza anche fragili e difficili 
+da mantenere e scalare.
+
+Nel 2023 si è registrato un primo progresso significativo con
+l'introduzione da parte di OpenAI del function calling e dei ``ChatGPT
+plugins''. Il primo forniva un meccanismo nativo tramite cui i large
+language model (LLM) potevano richiamare degli strumenti esterni, i
+secondi, invece, davano la possibilità a sviluppatori di terze parti di
+rendere disponibili direttamente i loro servizi al modello sotto forma
+di plugin.
+
+Nello stesso periodo altri fornitori AI hanno sviluppato soluzioni
+analoghe, ed anche vari framework hanno introdotto delle interfacce
+standardizzate per l'accesso agli strumenti da parte degli LLM,
+facilitando l'integrazione. Tuttavia, anche questa strategia ha
+alimentato un ecosistema frammentato, dove i fornitori di servizi si
+sono trovati a realizzare molteplici implementazioni ridondanti per
+rendere disponibili i propri strumenti nelle varie piattaforme,
+dovendosi adattare alle relative specificità.
+
+Nel novembre 2024 Anthropic ha presentato \textbf{MCP}, un protocollo 
+open-source che permette alle applicazioni AI di interagire in modo 
+standard con i sistemi software per accedere al contesto e alle capacità 
+che forniscono.
+
+Con l'avvento di questo nuovo protocollo si assiste ad un cambiamento di
+paradigma radicale «\emph{from tool bindings hardcoded per application
+toward an interoperable ecosystem of composable, discoverable network
+services}» \autocite{hou2025modelcontextprotocolmcp}.
+
+L'adozione di MCP introduce molteplici vantaggi strutturali
+nell'integrazione tra agenti AI e sistemi esterni. Innanzitutto, ogni
+server MCP con cui l'agente interagisce, indipendentemente dalla sua
+funzione, utilizza un unico protocollo di comunicazione. Dunque, una
+volta implementato il supporto a MCP, il client può comunicare con
+qualsiasi server MCP esistente. Inoltre, esponendo i
+loro servizi tramite un server MCP, gli sviluppatori mantengono l'implementazione
+agnostica rispetto ai diversi modelli e framework AI.
+
+Un ulteriore vantaggio consiste nel fatto che gli agenti possono
+interrogare direttamente i server MCP per individuare le funzioni
+disponibili nel momento corrente. Questo processo di scoperta dinamica
+disaccoppia gli agenti dalle funzionalità dei server, superando il
+precedente modello basato su integrazioni \emph{hardcoded}, e consentendo a
+server ed agenti di evolversi in modo indipendente.
+
+In aggiunta, grazie alla bidirezionalità dei canali di comunicazione
+client-server, il protocollo permette di strutturare delle interazioni
+più elaborate del semplice utilizzo di uno strumento da parte
+dell'agente. Infatti, MCP consente ai server, non solo di inviare
+notifiche ai client, ma anche di richiedere dati supplementari
+all'utente prima di finalizzare un'operazione.
+
+Infine, MCP è progettato con un'attenzione particolare alla sicurezza,
+integrando standard consolidati come OAuth 2.1 per la gestione di
+autenticazione e autorizzazione. Il protocollo assicura inoltre che le
+credenziali dei servizi esterni restino isolate nel server, evitando che
+siano esposte all'agente.
+
+MCP ha visto la sua adozione crescere in modo estremamente rapido a
+testimoniare l'efficacia dei benefici sopracitati nelle applicazioni
+reali. Attualmente, ad esempio, sfruttando dei server MCP un agente può
+accedere al Google Calendar del suo utente per visionarne gli impegni o
+può eseguire un comando nel terminale, oppure ancora leggere ed inviare
+messaggi su un canale Slack.
+
+\subsection{Architettura}\label{architettura}
+
+MCP è un protocollo basato su un’architettura client-host-server che
+prevede tre tipi di attori: \textbf{MCP host}, \textbf{MCP client}, e 
+\textbf{MCP server} \autocite{ArchitectureoverviewModelContextProtocol-2026-07-28}.
+
+L'attore principale, ossia l'host, è un agente AI che coordina le 
+operazioni e richiede accesso al contesto per fornirlo al modello AI
+incapsulato al suo interno. Il contesto a cui l'host deve accedere è 
+esposto dagli MCP server, dunque l'host ha necessità di comunicare con 
+uno o più di essi. Per farlo, l'host non gestisce le connessioni in 
+prima persona, ma istanzia per ciascun server un componente interno 
+dedicato, chiamato MCP client. Quest'ultimo è un modulo software che si 
+occupa unicamente di mantenere il canale di comunicazione bidirezionale 
+tra l'host e uno specifico MCP server.
+
+La \zcref{fig:diagramma_architettura} descrive visivamente l'architettura
+di MCP.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.5\textwidth]{diagrams/architettura.pdf}
+    \caption{Descrizione di alto livello dell'architettura di MCP. L'agente AI (host) comunica con uno o più server MCP tramite i rispettivi client MCP.}
+    \label{fig:diagramma_architettura}
+\end{figure}
+
+\subsubsection{Gli attori}\label{gli-attori}
+
+Innanzitutto, l'host svolge un ruolo di coordinamento, creando le
+istanze del client e gestendo tramite esse le connessioni con i server,
+e inoltre fa da tramite tra i server e l'agente AI. Infine, l'host si
+occupa di applicare le politiche di sicurezza, e di stabilire se
+autorizzare o meno determinate azioni, eventualmente chiedendo conferma
+all'utente.
+
+I client, invece, fungono da endpoint per la comunicazione tra gli host
+e i server. Ogni client stabilisce e mantiene una connessione dedicata
+verso uno specifico server, instradando i messaggi dall'host al server e
+viceversa. Inoltre, il client gestisce lo scambio di informazioni sulle
+capacità con il server, le notifiche e le sottoscrizioni alle risorse.
+
+Infine, il server integra le informazioni e le funzionalità offerte da
+uno o più servizi esterni e le espone agli agenti AI, permettendogli di
+estendere il contesto a loro disposizione. I server, inoltre, possono
+anche replicare ai messaggi dei client richiedendo l'inserimento di
+informazioni aggiuntive da parte dell'utente.
+
+I server MCP possono eseguire sia localmente sulla stessa macchina
+dell'host, che remotamente.
+
+Un tipico contesto in cui gli attori suddetti interagiscono è un flusso
+di lavoro che ha inizio con l'invio di una richiesta da parte
+dell'utente verso l'agente AI. In risposta, l'agente compone un prompt
+contenente la richiesta e la lista degli strumenti utilizzabili,
+ottenuta interagendo con uno o più server MCP di cui l'agente dispone
+attraverso i rispettivi client. Una volta inoltrate tali informazioni al
+modello AI, quest'ultimo valuta le funzionalità necessarie per
+soddisfare la richiesta, ed indica ai client MCP quali strumenti
+invocare e con quali parametri. Infine, dopo aver orchestrato i vari
+strumenti per raggiungere il suo obiettivo, il modello elabora una
+risposta per l'utente in cui lo informa sull'esito delle operazioni
+svolte.
+
+Gli editor di codice basati su AI come Visual Studio Code illustrano
+bene l'applicazione pratica dell'architettura di MCP. Gli agenti AI
+integrati negli editor possono connettersi tramite degli MCP client a
+svariati MCP server. Ad esempio, come si può osservare nella 
+\zcref{fig:diagramma_architettura_esempio}, Github Copilot in VS Code può
+utilizzare un server locale per accedere al FileSystem e creare,
+modificare, e cancellare file, o sfruttare il server remoto di Github
+per controllare la storia dei commit e le pull request dei repository.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.6\textwidth]{diagrams/architettura_esempio_VS_Code.pdf}
+    \caption{Descrizione di alto livello dell'architettura di MCP in un contesto reale. L'agente AI integrato in VS Code comunica con due server MCP, uno locale e uno remoto, tramite i rispettivi client MCP.}
+    \label{fig:diagramma_architettura_esempio}
+\end{figure}
+
+\subsection{Data layer e transport
+layer}\label{data-layer-e-transport-layer}
+
+MCP adotta una struttura modulare che separa nettamente le
+responsabilità tra due livelli distinti \autocite{SpecificationModelContextProtocol-2026-07-28}. 
+Il data layer individua il formato e la semantica dei messaggi, mentre 
+il transport layer si occupa esclusivamente di come i messaggi vengono 
+incapsulati e consegnati.
+
+Questa separazione garantisce che la semantica del protocollo rimanga
+uniforme su qualsiasi canale di comunicazione, permettendo di introdurre
+nuovi trasporti senza alterare la logica applicativa.
+
+\subsection{Data layer}\label{data-layer}
+
+Il data layer di MCP definisce il protocollo per la comunicazione tra
+client e server, il quale si basa sulla specifica JSON-RPC 2.0 come
+formato di scambio dei messaggi.
+
+\subsubsection{JSON-RPC}\label{json-rpc}
+
+JSON-RPC è un protocollo di chiamata di procedura remota che utilizza
+JSON (JavaScript Object Notation) come formato per definire le strutture
+dati su cui si basa, e non è vincolato ad un meccanismo di trasporto
+specifico.
+
+Il protocollo è strutturato in modo molto semplice e si basa
+principalmente su due oggetti \textbf{Request} e \textbf{Response}. Il
+primo oggetto rappresenta la chiamata remota che viene inviata dal
+client al server, e contiene un campo per il nome della procedura da
+invocare e uno per gli eventuali parametri da passarle.
+
+L'oggetto Response, invece, rappresenta l'esito della chiamata remota che
+il server restituisce al client, e contiene due campi result e error.
+Result memorizza il valore prodotto in output dalla procedura invocata,
+e viene incluso nella risposta dal server se l'esecuzione del metodo
+termina con successo. Error, invece, è un oggetto strutturato che
+descrive l'errore verificatosi nella gestione della chiamata remota, ed è
+incluso in Response proprio quando il server riscontra un problema nel
+processare la richiesta del client.
+
+Per permettere di associare una risposta del server alla relativa
+richiesta, JSON-RPC definisce un campo id in Request e Response. Tale
+campo deve essere impostato all'interno di una risposta con lo stesso
+valore contenuto nell'id della richiesta a cui fa seguito.
+
+Si riporta qui un esempio basilare di scambio Request-Response tratto
+dalla specifica JSON-RPC 2.0 in cui un client effettua una chiamata remota
+di un metodo subtract che effettua una sottrazione tra due numeri, e il
+server gestisce con successo la richiesta:
+
+\begin{itemize}
+\item Richiesta del client: 
+    \lstinline|{"jsonrpc": "2.0", "method": "subtract", "params": [42, 23], "id": 1}|
+
+\item Risposta del server: 
+    \lstinline|{"jsonrpc": "2.0", "result": 19, "id": 1}|
+\end{itemize}
+
+JSON-RPC supporta anche l'invio di notifiche, ossia messaggi
+unidirezionali, per cui il client che li invia non necessita, e non
+riceve, alcuna risposta da parte del server. Le notifiche
+(\textbf{Notification}) sono rese dal protocollo semplicemente come
+oggetti Request in cui il campo id viene omesso.
+
+\subsubsection{I messaggi}\label{i-messaggi}
+
+MCP definisce tre tipi fondamentali di messaggi che client e server si
+possono scambiare: richieste, risposte, e notifiche.
+
+Le \textbf{richieste} sono dei messaggi finalizzati a richiedere
+l'esecuzione di un'operazione da parte di un server o di un client MCP.
+Esse si basano sugli oggetti Request di JSON-RPC 2.0, e in aggiunta MCP
+impone che si includa sempre al loro interno un id non-nullo, e che
+questo sia diverso da qualsiasi id utilizzato dal mittente in una
+richiesta precedente per cui non ha ancora ricevuto una risposta.
+
+Le \textbf{risposte} sono dei messaggi che un server o un client invia
+come riscontro per una richiesta ricevuta e sono basate sugli oggetti
+Response di JSON-RPC 2.0.
+
+Esistono due tipi di risposta: le result responses, che sono inviate
+quando l'operazione richiesta viene eseguita con successo e che
+contengono il campo result, e le error responses, inviate quando viene
+riscontrato un errore nella gestione della richiesta e contenenti il
+campo error. Inoltre, si nota che MCP aggiunge rispetto a JSON-RPC il
+requisito che l'oggetto result contenga un campo resultType.
+Quest'ultimo permette ai client di determinare in modo dinamico la
+struttura di result, abilitando il polimorfismo del risultato.
+
+Infine, le \textbf{notifiche} sono dei messaggi unidirezionali che i
+client possono inviare ai server e viceversa. Sono definite in modo
+sostanzialmente identico alle Notification di JSON-RPC 2.0.
+
+\subsubsection{I pattern di messaggi}\label{i-pattern-di-messaggi}
+
+Le diverse funzionalità del protocollo MCP si realizzano attraverso tre
+cosiddetti pattern di messaggi, ovvero specifiche tipologie di
+interazione client-server. Ciascuno di questi schemi d'interazione viene
+strutturato combinando gli elementi costitutivi descritti nel paragrafo
+precedente, ossia i tre tipi di messaggio: richiesta, risposta e
+notifica.
+
+Un principio fondamentale osservato da tutti i pattern risiede nella
+natura asimmetrica delle interazioni, le quali vengono sempre originate
+dal client. Quest'ultimo assume il ruolo di iniziatore inviando
+richieste e notifiche, a fronte delle quali il server si limita a
+fornire un riscontro. Coerentemente con tale impostazione, ai server è
+preclusa la possibilità di avviare autonomamente richieste, così come i
+client non emettono risposte.
+
+Il primo pattern è chiamato \textbf{Request and Response} e rappresenta
+la modalità di interazione più lineare: a una richiesta inoltrata dal
+client il server replica con un oggetto di tipo result o error. Nel
+corso dell'elaborazione, il server ha la facoltà di trasmettere
+notifiche intermedie, come aggiornamenti sullo stato di avanzamento.
+
+Qualora l'esecuzione di un'operazione richieda al server l'acquisizione
+di ulteriori dati dal client si adotta il pattern \textbf{Multi
+Round-Trip Requests}. In tale scenario, il server risponde alla
+richiesta del client con un risultato di tipo \texttt{input\_required},
+inducendo il client a reiterare la richiesta integrando dei parametri
+aggiuntivi.
+
+Infine, nel pattern \textbf{Subscribe and Notify}, il client invia una
+richiesta con il metodo \path{subscriptions/listen} per essere aggiornato dal
+server quando si verificano eventi di un certo tipo, ad esempio quando
+viene modificata una particolare risorsa. Nel momento in cui il server
+riceve tale richiesta apre uno stream di notifiche del tipo richiesto
+verso il client.
+
+\subsubsection{Le primitive}\label{le-primitive}
+
+MCP individua una serie di primitive, le quali rappresentano delle
+tipologie di funzionalità (operazioni e contesto informativo) che i
+server e i client possono offrirsi reciprocamente.
+
+\subsubsection{Primitive dei server}\label{primitive-dei-server}
+
+MCP permette la \textbf{scoperta dinamica} da parte dell'host delle
+funzionalità offerte dal server. Ciò significa che un agente AI, mentre
+utilizza un server MCP, può rilevare se le capacità che esso espone
+cambiano e come.
+
+Questo è possibile grazie al fatto che per ciascuna primitiva è definito
+un metodo \texttt{*/list} che elenca tutte le funzioni disponibili per la
+specifica categoria, ed un metodo \texttt{*/get} per ottenere una particolare
+funzione appartenente alla determinata categoria.
+
+Inoltre, quando per una certa primitiva cambiano le funzionalità esposte dal 
+server, è il server stesso a comunicarlo ai client che si sono “iscritti”
+a tale primitiva (message pattern Subscribe and Notify), inviando ad essi
+una notifica.
+
+I metodi che i server possono mettere a disposizione rientrano in tre
+diverse primitive: strumenti, risorse, e prompt.
+
+Gli \textbf{strumenti} (tool) sono funzioni eseguibili che gli agenti AI
+possono invocare per compiere azioni, come interagire con il FileSystem
+per modificare un file. Tali strumenti vengono richiamati mediante il
+metodo \path{tools/call}.
+
+Le \textbf{risorse} (resources) rappresentano sorgenti dati a cui le
+applicazioni AI possono accedere in sola lettura per ottenere
+informazioni di contesto, come il contenuto di documenti o dei record
+estratti da un database. L'accesso a tali risorse avviene tramite il
+metodo \path{resources/read}.
+
+I prompt, infine, consistono in template di istruzioni per illustrare
+all'agente AI come utilizzare specifici tool o risorse per svolgere
+determinati compiti.
+
+\subsubsection{Primitive dei client}\label{primitive-dei-client}
+
+I client mettono a disposizione un'unica primitiva,
+l'\textbf{elicitation}, la quale permette ai server di richiedere
+informazioni aggiuntive all'utente dell'agente AI. I server effettuano
+tali richieste nella modalità individuata dal pattern Multi Round-Trip
+Requests ed utilizzando il metodo \path{elicitation/create}.
+
+Si osserva che in precedenza MCP definiva quattro diverse primitive lato
+client, ma tre di queste (sampling, roots, e logging) sono state
+deprecate nella versione 2026-07-28 della specifica.
+
+Per una trattazione più dettagliata e corredata da esempi delle primitive 
+si rimanda al \zcref{server} per quelle lato server e al \zcref{client} 
+per quelle lato client.
+
+\subsubsection{La connessione}\label{la-connessione}
+
+Inizialmente, il protocollo MCP si avvaleva di un modello di tipo
+\textbf{stateful}, basato su una procedura di handshake iniziale per
+l'apertura della sessione. Durante tale fase, client e server
+negoziavano la versione e le capacità, permettendo al server di
+mantenere tale contesto informativo per l'intero arco della connessione.
+Tuttavia, tale configurazione ha mostrato diverse criticità, tra cui la
+difficoltà di scalare orizzontalmente il servizio, la scarsa resilienza
+in caso di guasti e l'elevata complessità implementativa sia lato client
+che lato server.
+
+Dunque, con l'avvento della specifica 2026-07-28, MCP è evoluto in un
+protocollo \textbf{stateless}.
+
+In questo nuovo paradigma, i singoli messaggi di richiesta del client
+contengono nel campo \texttt{\_meta} tutti i dati necessari per essere elaborati
+dal server: nome e versione del client, versione del protocollo e
+capacità operative. Il server gestisce ciascuna richiesta in modo
+indipendente, senza desumere alcun contesto da interazioni pregresse,
+seppur avvenute all'interno del medesimo canale comunicativo. Qualora
+l'esecuzione richieda che uno stato persista tra più richieste, il
+client è tenuto a inserire un identificatore esplicito in ogni
+successiva invocazione.
+
+\subsubsection{Negoziazione delle
+capacità}\label{negoziazione-delle-capacituxe0}
+
+Nella nuova versione del protocollo anche il sistema di negoziazione
+delle capacità cambia significativamente: il client specifica in ogni
+richiesta le proprie funzionalità nell'attributo
+\path{_meta.io.modelcontextprotocol/clientCapabilities}, mentre le capacità
+del server sono rilevabili attraverso il metodo \path{server/discover}.
+
+\subsection{Transport layer}\label{transport-layer}
+
+Il transport layer di MCP definisce i meccanismi di trasporto
+sottostanti al protocollo di comunicazione, anche detti
+\textbf{binding}, per mezzo dei quali i messaggi vengono incapsulati e
+trasferiti tra il client e il server. Inoltre, i binding determinano
+anche come la connessione tra client e server viene inizializzata e
+terminata, come vengono trasmessi i metadati, e come il client può
+cancellare una richiesta inoltrata al server.
+
+I meccanismi di trasporto operano in modo del tutto indipendente
+rispetto al contenuto dei messaggi, garantendo che i pattern
+d'interazione conservino la medesima semantica a prescindere dallo
+specifico canale di comunicazione adottato.
+
+MCP prevede due canali di trasporto standard: stdio, per la
+comunicazione tra un client ed un server locale, e Streamable HTTP, tra
+un client e un server remoto.
+
+\subsubsection{Stdio}\label{stdio}
+
+Il meccanismo di trasporto \textbf{Stdio} prevede che il client esegua
+il server MCP come un processo figlio, stabilendo un canale di
+comunicazione bidirezionale basato sugli stream standard \texttt{stdin} e \texttt{stdout}.
+In tale configurazione, i messaggi vengono scambiati in sequenza,
+separati da caratteri di nuova riga, garantendo che \texttt{stdout} sia dedicato
+esclusivamente alla trasmissione di pacchetti MCP sintatticamente
+validi, mentre eventuali log vengono instradati su \texttt{stderr}. Infine, la
+terminazione della comunicazione viene innescata dal client attraverso
+la chiusura dello stream di input.
+
+\subsubsection{Streamable HTTP}\label{streamable-http}
+
+Nel trasporto tramite \textbf{Streamable HTTP} il server si configura
+come un processo autonomo che espone un unico endpoint HTTP. Ogni
+interazione avviata dal client viene veicolata tramite il metodo \texttt{HTTP
+POST}, a cui il server può rispondere restituendo un singolo oggetto JSON
+o, in alternativa, attivando uno stream SSE (Server-Sent Events)
+dedicato alla specifica richiesta. Sotto il profilo della sicurezza, i
+server sono obbligati a verificare l'header Origin per prevenire
+attacchi di DNS rebinding.
+
+\subsection{Server}\label{server}
+
+I server MCP, come precedentemente illustrato, costituiscono i blocchi
+fondamentali tramite cui è possibile estendere il contesto a
+disposizione degli LLM. Un server espone in modo standard i dati e le
+funzionalità di uno o più servizi alle applicazioni AI, e può offrire
+tre tipi di primitive: tool, risorse, e prompt. Di seguito si
+approfondiscono tali primitive.
+
+\subsubsection{Tool}\label{tool}
+
+I tool sono funzioni eseguibili che permettono al modello AI di
+intraprendere azioni, come effettuare chiamate API verso servizi
+esterni. Nel caso degli strumenti, il controllo è affidato al modello
+che, analizzando le richieste dell'utente, decide autonomamente se, come
+e quando invocare un determinato tool tra quelli resi disponibili dal
+server. Ogni tool espone uno schema JSON che ne definisce i parametri di
+input richiesti e la struttura dell'output atteso. I risultati
+restituiti dal server a seguito dell'invocazione di un tool possono
+presentarsi sia in formato non strutturato, come testo o immagini, che
+in formato strutturato, quindi come dei valori JSON. A causa della
+natura attiva dei tool e della loro capacità di alterare lo stato dei
+sistemi esterni, il protocollo suggerisce di affiancare a questa
+primitiva dei meccanismi di sicurezza di tipo human-in-the-loop, che
+delegano all'utente finale la conferma e l'autorizzazione prima di
+finalizzare l'esecuzione delle operazioni.
+
+\paragraph{Esempio}\label{esempio-tool}
+
+Al fine di illustrare l'impiego dei tool, si considera un agente AI a
+cui l'utente chiede le previsioni meteo per la città di Torino.
+L'interazione con il server MCP del meteo necessaria per assolvere a
+questo compito esemplifica anche direttamente il message pattern Request
+and Response. In conformità a tale schema asimmetrico, è il client MCP,
+su comando dell'host, ad assumere l'iniziativa: esso invia un primo
+messaggio di richiesta assegnandogli un identificativo nel campo id (ad
+esempio \texttt{1}) ed utilizzando il metodo \texttt{tools/list} per interrogare il
+server. Il server restituisce un messaggio di risposta contraddistinto
+dal medesimo \texttt{id 1}, nel quale riporta l'elenco dei vari tool disponibili.
+Questo include lo strumento \texttt{"get\_weather"}, caratterizzato da un
+\texttt{inputSchema}che prescrive l'uso del parametro \texttt{"location"}.
+
+Comprendendo l'obiettivo dell'utente, l'agente AI sceglie di invocare
+\texttt{"get\_weather"}. Il client avvia dunque una seconda interazione Request
+and Response, inoltrando una nuova richiesta (questa volta con id
+impostato a \texttt{2}) avente come metodo \texttt{tools/call}. All'interno di tale
+messaggio, il client indica il tool da invocare e i parametri con cui
+chiamarlo specificando \texttt{"get\_weather"} nel campo \texttt{name} e passando
+l'oggetto \texttt{\{"location": "Torino"\}} nel campo \texttt{arguments},
+rispettivamente. Il server esegue l'operazione richiesta e chiude
+l'interazione inviando un messaggio di risposta con \texttt{id 2}. Tale messaggio
+restituisce l'esito dell'esecuzione all'interno del campo \texttt{content} (ad
+esempio, il testo \texttt{"25°C, soleggiato"}) e presenta l'attributo \texttt{isError}
+impostato a \texttt{false}, confermando all'agente il successo dell'operazione e
+permettendogli di finalizzare la risposta all'utente.
+
+La \zcref{fig:esempio_tool} illustra visivamente l'esempio sopra descritto.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=\textwidth]{diagrams/esempio_tool.pdf}
+    \caption{Descrizione dell'interazione tra client e server MCP per l'uso del tool \texttt{get\_weather}.}
+    \label{fig:esempio_tool}
+\end{figure}
+
+\subsubsection{Risorse}\label{risorse}
+
+Le risorse rappresentano contenuti informativi a cui un agente AI può
+accedere, senza modificarle, per acquisire contesto aggiuntivo. Esse
+sono identificate in modo univoco tramite URI (Uniform Resource
+Identifier) e sono gestite dall'applicazione host. È infatti l'agente AI
+a decidere come e quando integrare queste informazioni nel contesto
+dell'interazione, anche eventualmente permettendo all'utente di
+stabilirlo in modo autonomo.
+
+MCP consente ai server di referenziare le risorse tramite degli URI
+fissi che puntano a risorse singole (e.g.~\path{calendar://events/2026}), o
+tramite degli URI parametrici, detti resource templates, che possono
+essere adattati per richiedere risorse specifiche
+(e.g.~\path{weather://forecasts/{location}/{datetime}}). Inoltre, i server
+possono supportare l'iscrizione alle risorse, permettendo ai client di
+ricevere notifiche in tempo reale se il loro contenuto viene modificato.
+
+\paragraph{Esempio}\label{esempio-risorse}
+
+Per illustrare il funzionamento della primitiva delle risorse, si
+considera un agente AI a cui l'utente chiede di riassumere un file di
+documentazione locale associato ad un progetto software. L'interazione
+per l'accesso a questi dati si articola basandosi nuovamente sul message
+pattern Request and Response. Inizialmente, il client inoltra una
+richiesta utilizzando il metodo \texttt{resources/list} per scoprire i contenuti
+esposti dal server in quel momento. Il server risponde al client
+fornendo l'elenco delle risorse disponibili, specificando per ciascuna
+di esse un identificatore univoco URI (ad esempio, \path{file:///project/README.md}) e 
+il relativo tipo MIME (ad esempio, \texttt{"text/markdown"}).
+
+Una volta che l'utente ha selezionato nell'agente AI la risorsa a cui è
+riferita la sua richiesta, il client avvia una seconda interazione
+Request and Response inviando una richiesta basata sul metodo
+\texttt{resources/read}, all'interno della quale valorizza il parametro \texttt{uri} con
+\path{file:///project/README.md}. Il server elabora la chiamata e
+restituisce un messaggio di risposta che include il testo effettivo del
+documento all'interno di un array denominato \texttt{contents}. A questo punto,
+l'agente ha accesso al contenuto e può generare il riassunto per
+l'utente.
+
+In aggiunta, essendo i dati delle risorse potenzialmente mutevoli nel
+tempo, questa primitiva può esemplificare anche l'utilizzo del message
+pattern Subscribe and Notify. In base a tale schema di interazione,
+l'agente può inviare tramite il client una richiesta con il metodo
+\texttt{subscriptions/listen} indicando l'URI del file README a cui intende
+iscriversi. Il server, in risposta, tiene aperto un flusso di
+comunicazione continuo su cui emette in modo proattivo una notifica di
+tipo \texttt{notifications/resources/updated} ogniqualvolta il file originale
+subisce una modifica. Alla ricezione di questo avviso unidirezionale da
+parte del server, il client può effettuare in autonomia una nuova
+richiesta di lettura, garantendo all'agente un contesto informativo
+costantemente sincronizzato con lo stato della risorsa.
+
+La \zcref{fig:esempio_risorse} illustra visivamente l'esempio sopra descritto.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=\textwidth]{diagrams/esempio_risorse.pdf}
+    \caption{Descrizione dell'interazione tra client e server MCP per l'uso della risorsa \texttt{file:///project/README.md}.}
+    \label{fig:esempio_risorse}
+\end{figure}
+
+\subsubsection{Prompt}\label{prompt}
+
+I prompt consistono in template di istruzioni progettati per guidare ed
+ottimizzare le interazioni con il modello AI in contesti specifici, ad
+esempio per illustrare al LLM con quali tool e/o risorse deve interagire
+per svolgere un determinato compito. Più precisamente, un prompt è
+articolato in uno o più messaggi per il modello, che possono includere
+testo, immagini, audio o collegamenti a risorse specifiche.
+
+MCP supporta inoltre la definizione di prompt parametrici, i quali
+possono essere adattati dinamicamente dall'utente durante l'esecuzione
+tramite l'inserimento di argomenti. Un possibile esempio di prompt
+parametrico è un prompt che richiede al modello AI di revisionare
+secondo determinati criteri una porzione di codice che l'utente fornisce
+come argomento al momento dell'invocazione.
+
+Infine, si nota che i prompt, a differenza delle risorse, sono gestiti
+dagli utenti dell'applicazione AI, che decidono quando invocarli in base
+alle loro esigenze.
+
+\paragraph{Esempio}\label{esempio-prompt}
+
+Per illustrare l'utilizzo della primitiva dei prompt, si considera uno
+scenario in cui l'utente intende far revisionare una porzione di codice
+Python all'agente AI senza occuparsi di formulare la richiesta per il
+modello, ma avvalendosi di un template predefinito. L'interazione tra i
+componenti si articola seguendo ancora una volta il message pattern
+Request and Response. Inizialmente, il client MCP invia una richiesta
+utilizzando il metodo \texttt{prompts/list} per ottenere l'insieme dei template
+messi a disposizione dal server. Il server restituisce un messaggio di
+risposta recante l'elenco dei prompt disponibili, tra cui figura, ad
+esempio, un template identificato dal nome \texttt{"code\_review"} che prevede
+la fornitura di un parametro ``code'' all'interno dei suoi argomenti.
+
+A differenza dei tool, i prompt sono controllati dall'utente, che li
+seleziona in modo esplicito tramite l'interfaccia dell'agente AI. Una
+volta che l'utente seleziona il prompt per la revisione e fornisce il
+frammento di codice, il client avvia una seconda interazione Request and
+Response, inoltrando una richiesta basata sul metodo \texttt{prompts/get}.
+All'interno di questo messaggio, il client richiede la risoluzione del
+template specificando \texttt{"code\_review"} nel campo \texttt{name} e inserendo il
+codice Python all'interno dell'oggetto \texttt{arguments}. Il server processa la
+richiesta popolando dinamicamente il template e chiude l'interazione
+inviando un messaggio di risposta che include un attributo \texttt{messages}.
+Tale campo fornisce un array di messaggi già formattati per il modello
+AI, in cui ogni elemento è caratterizzato da un campo \texttt{role} (ad esempio,
+\texttt{"user"}) per indicare il mittente e da un campo \texttt{content} contenente le
+istruzioni di revisione combinate con il codice Python. L'agente AI
+acquisisce così questo contesto pre-strutturato, integrandolo nella
+conversazione per soddisfare la richiesta dell'utente.
+
+La \zcref{fig:esempio_prompt} illustra visivamente l'esempio sopra descritto.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=\textwidth]{diagrams/esempio_prompt.pdf}
+    \caption{Descrizione dell'interazione tra client e server MCP per l'uso del prompt \texttt{code\_review}.}
+    \label{fig:esempio_prompt}
+\end{figure}
+
+\subsection{Client}\label{client}
+
+I client MCP operano come intermediari tra l'applicazione host e il
+server MCP. Ogni istanza client è creata dall'host per gestire una
+connessione con uno specifico server, e si occupa principalmente di
+trasferire i messaggi tra host e server in entrambe le direzioni,
+allegando ad ogni richiesta i metadati necessari al server per
+processarla.
+
+Nell'ultima specifica di MCP, l'unica primitiva che i client possono
+esporre è l'elicitation.
+
+\subsubsection{Elicitation}\label{elicitation}
+
+L'elicitation fornisce un meccanismo attraverso il quale i server
+possono richiedere informazioni aggiuntive all'utente tramite il client
+durante l'elaborazione di una richiesta.
+
+L'approccio adottato dalla primitiva assicura che l'acquisizione delle
+informazioni di cui necessita il server avvenga sempre sotto il
+controllo diretto dell'applicazione host. In questo modo vengono
+garantite trasparenza e sicurezza per l'utente, consentendo inoltre a
+quest'ultimo di rifiutare la richiesta del server, se lo desidera.
+
+Dalla specifica 2026-07-28 di MCP, il flusso dell’elicitation segue
+il message pattern \hyperref[i-pattern-di-messaggi]{Multi Round-Trip Requests}. 
+Il server, avendo bisogno di ulteriori informazioni per soddisfare una 
+richiesta del client, replica ad essa con un risultato di tipo \texttt{input\_required}.
+Il client che riceve dal server questo tipo di risposta gli inoltra
+nuovamente la richiesta a cui è riferita, includendo un campo aggiuntivo
+\texttt{inputResponses}. All’interno di tale campo il client specifica se ignora,
+respinge o accetta la richiesta di informazioni, e nell’ultimo caso, 
+eventualmente, anche un qualche contenuto.
+
+
+L'elicitation supporta due diverse modalità: form e URL mode.
+
+La \textbf{form mode} consente al server di raccogliere informazioni,
+fornendo al client un JSON schema che specifica la struttura dei dati
+richiesti all'utente. In questa modalità i dati inseriti dall'utente
+sono visibili al client.
+
+La \textbf{URL mode}, invece, permette al server di indirizzare l'utente
+verso un URL esterno, dove esso interagisce con un sito web senza che i
+dati scambiati vengano intercettati dal client.
+
+Per ragioni di sicurezza, il protocollo impone che i server non
+utilizzino la modalità form per richiedere informazioni sensibili, come
+password, chiavi API o credenziali di pagamento. Per tali interazioni è
+obbligatorio l'uso della modalità URL, che garantisce che dati critici
+non transitino attraverso il client MCP.
+
+\paragraph{Esempio}\label{esempio-elicitation}
+
+Al fine di illustrare il funzionamento dell'elicitation, si considera
+uno scenario in cui l'agente AI tenta di invocare un tool per
+interrogare un sistema esterno, come ad esempio GitHub, ma il server
+necessita di conoscere il nome utente per poter procedere. L'interazione
+necessaria per acquisire questa informazione esemplifica anche il
+message pattern Multi Round-Trip Requests.
+
+Inizialmente, il client MCP inoltra una normale richiesta (assegnandole,
+ad esempio, \texttt{1} come identificativo) utilizzando il metodo \texttt{tools/call} per
+avviare lo strumento. Il server, constatando l'assenza del nome utente
+necessario per operare, sospende l'esecuzione e restituisce una risposta
+contenente un risultato di tipo \texttt{input\_required}. All'interno di tale
+messaggio, il server inserisce un oggetto \texttt{inputRequests} che incapsula
+una richiesta \texttt{elicitation/create}. Per raccogliere il dato, il server si
+avvale della form mode: imposta dunque il parametro mode a \texttt{"form"} e
+fornisce un \texttt{requestedSchema} in formato JSON Schema, che prescrive al
+client di richiedere una stringa di testo corrispondente al nome utente.
+
+L'applicazione host, interpretando la richiesta, presenta un modulo
+all'utente, il quale inserisce il proprio nome (ad esempio, \texttt{"Paolo58"})
+e autorizza la condivisione. A questo punto, in aderenza alla logica del
+pattern Multi Round-Trip Requests, il client avvia il secondo ciclo
+dell'interazione (round-trip) reiterando la richiesta \texttt{tools/call}
+originale, alla quale però assegna un nuovo identificativo univoco (ad
+esempio \texttt{2}). In questa nuova chiamata, il client integra il campo
+aggiuntivo \texttt{inputResponses}, all'interno del quale specifica l'avvenuta
+autorizzazione impostando \texttt{action} ad \texttt{"accept"} e fornisce il dato
+acquisito tramite l'oggetto \texttt{\{"name": "Paolo58"\}} nel campo \texttt{content}.
+Ricevute le informazioni mancanti, il server riprende l'elaborazione
+della chiamata e conclude l'interazione inviando un messaggio di
+risposta finale, associato all'\texttt{id 2}, contenente l'esito dell'esecuzione
+del tool.
+
+La \zcref{fig:esempio_elicitation} illustra visivamente l'esempio sopra descritto.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=\textwidth]{diagrams/esempio_elicitation.pdf}
+    \caption{Descrizione dell'interazione tra client e server MCP per l'uso di un tool che richiede informazioni aggiuntive tramite elicitation.}
+    \label{fig:esempio_elicitation}
+\end{figure}
+
+\section{Il Blindingly Simple Protocol Language}\label{bspl}
+
+Nei sistemi informativi distribuiti composti da componenti software eterogenei e autonomi, 
+spesso sviluppati da organizzazioni differenti e operanti su piattaforme non omogenee, la 
+cooperazione richiede la definizione di regole formali di comunicazione condivise. 
+L'\emph{Interaction-Oriented Programming} (IOP) affronta questo scenario spostando il fulcro 
+della progettazione dalla struttura interna dei singoli componenti alla specifica delle 
+loro interazioni pubbliche \autocite{singh2011bspl}.
+
+All'interno di questo paradigma, un \textbf{protocollo} definisce lo schema formale delle 
+comunicazioni consentite tra determinati \textbf{ruoli}. In tal modo, ciascun partecipante 
+mantiene la propria autonomia implementativa e decisionale, con l'unico vincolo di conformarsi 
+alla grammatica dei messaggi stabilita dal protocollo durante l'interazione.
+
+Tradizionalmente, la modellazione dei protocolli di interazione nei sistemi multi-agente è 
+stata affrontata impiegando formalismi di tipo procedurale, quali i \emph{Message Sequence 
+Charts} (MSC), AUML, BPMN e WS-CDL. Questi linguaggi descrivono l'interazione attraverso diagrammi 
+di flusso, prescrivendo in modo esplicito sequenze rigide di messaggi, 
+diramazioni condizionali e costrutti di sincronizzazione imperativi.
+
+Tuttavia, l'imposizione di un flusso di controllo procedurale presenta criticità rilevanti 
+quando applicata a contesti distribuiti ed asincroni. Da un lato, tali modelli tendono a 
+risultare sovra-vincolati, poiché stabiliscono un ordine temporale 
+rigido anche tra comunicazioni che non presentano alcuna reale dipendenza logica; ciò limita 
+il parallelismo e costringe gli sviluppatori a realizzare adattatori complessi per i singoli 
+agenti, aumentando l'accoppiamento del sistema. Dall'altro lato, in reti prive di un'autorità 
+centrale o di una memoria condivisa, i flussi di controllo procedurali faticano a gestire 
+l'asincronia, esponendo il sistema ad anomalie di coordinamento quali la \emph{nonlocal choice} 
+(in cui decisioni concorrenti ed incompatibili, prese in modo indipendente da agenti distinti, 
+generano stati di inconsistenza o di stallo) e la \emph{blindness} (in cui un ruolo non ha 
+visibilità locale sufficiente per verificare se un vincolo di precedenza globale sia stato 
+effettivamente rispettato) \autocite{singh2011lost}.
+
+Per superare la rigidità dei modelli procedurali, la ricerca nel settore dei sistemi 
+multi-agente ha proposto approcci dichiarativi incentrati sul significato di business delle 
+interazioni, ad esempio modellando i messaggi in termini di impegni sociali 
+tra le parti. Ciononostante, per essere eseguiti in pratica, questi approcci semantici 
+necessitavano comunque di regole operazionali precise per disciplinare l'invio effettivo dei 
+messaggi, finendo spesso per riutilizzare vincoli procedurali sull'ordine delle comunicazioni e 
+reintroducendo i medesimi problemi di accoppiamento.
+
+Proprio con l'obiettivo di definire regole di esecuzione concrete ma puramente dichiarative, nel 2011 
+Munindar P. Singh ha introdotto il \textbf{Blindingly Simple Protocol Language} 
+(\textbf{BSPL}) \autocite{singh2011bspl}.
+
+In BSPL, il protocollo viene trattato come una \emph{first-class abstraction}: questo significa
+che l'interazione è modellata come un modulo autonomo, incapsulato e dotato di una propria 
+interfaccia pubblica (definita da ruoli e parametri), il quale può essere specificato, verificato 
+formalmente e riutilizzato per composizione con altri protocolli senza dover dipendere dal codice 
+interno degli agenti o da motori di orchestrazione centralizzati.
+
+L'elemento distintivo di BSPL risiede nel suo approccio guidato dall'informazione: il linguaggio 
+non contiene costrutti per imporre sequenze, bivi o cicli tra i messaggi. L'ordine in cui le 
+comunicazioni possono avvenire non viene fissato a priori nella struttura di controllo, ma scaturisce 
+proprio dalle informazioni che i messaggi trasmettono, più precisamente dalle dipendenze causali 
+tra queste informazioni.
+
+\subsection{Principi guida}\label{bspl:principi}
+
+La formulazione di BSPL poggia su quattro principi fondamentali che ne guidano sia la 
+struttura che la semantica operazionale \autocite{singh2011bspl}:
+
+Innanzitutto, il principio dell'\textbf{orientamento all'informazione} stabilisce che la finalità 
+principale per cui gli agenti interagiscono risieda nello scambio e nella generazione di dati.
+Di conseguenza, un protocollo BSPL specifica, accanto ai ruoli partecipanti, l'insieme dei 
+\textbf{parametri} che ne costituiscono il contenuto informativo. Il progresso dell'interazione 
+coincide operativamente con la progressiva assegnazione di valori (\emph{binding}) a tali parametri.
+
+In secondo luogo, la \textbf{causalità esplicita} stabilisce che 
+l'ordinamento temporale tra le comunicazioni dipenda unicamente dalla disponibilità delle 
+informazioni. In BSPL, un agente è abilitato a inviare un messaggio solo nel 
+momento in cui possiede localmente tutti i parametri richiesti in ingresso da quello specifico 
+schema di messaggio. Pertanto, se un messaggio necessita di un dato prodotto esclusivamente da 
+un altro messaggio, il primo potrà essere emesso solo dopo che il secondo ha avuto luogo e il 
+dato è stato comunicato. Al contrario, se due messaggi non presentano dipendenze informative 
+reciproche, gli agenti possono inviarli in qualsiasi ordine o simultaneamente, massimizzando 
+la concorrenza ed evitando vincoli di sequenziamento artificiosi.
+
+Inoltre, il modello adotta il principio dell'\textbf{assenza di stato globale}, 
+non richiedendo alcun database condiviso o sincronizzazione centrale 
+tra i nodi. L'intero stato pubblico dell'interazione (definito \emph{social state}) è 
+tracciabile esclusivamente nei messaggi scambiati. Ciascun agente determina la 
+legittimità delle proprie azioni basandosi unicamente sul proprio stato locale (\emph{local 
+state}), ovvero sull'insieme dei dati appresi attraverso i messaggi che ha personalmente 
+inviato o ricevuto.
+
+Infine, BSPL garantisce la netta \textbf{separazione tra struttura operazionale e significato}.
+Il protocollo si occupa della correttezza operazionale delle comunicazioni, 
+stabilendo chi produce e consuma ciascun parametro e quando un messaggio sia ammissibile.
+Si astiene, invece, dal vincolare la logica decisionale privata con cui ciascun agente elabora
+i propri dati internamente o il valore semantico delle transazioni. 
+Tale disaccoppiamento consente di aggiungere formalismi semantici di livello superiore, 
+come gli impegni contrattuali, su una base operazionale distribuita.
+
+\subsection{Modello informativo}\label{bspl:modello}
+
+BSPL formalizza l'interazione tra agenti adottando un approccio che prende spunto 
+dal modello relazionale di Codd \autocite{singh2011bspl}. In questo formalismo, 
+un protocollo viene trattato come uno schema di relazione, composto dai parametri definiti all'interno
+del protocollo stesso, mentre ciascuna sua singola esecuzione (\emph{enactment}) corrisponde a una tupla di 
+valori assegnati a tali parametri.
+
+Più precisamente, una specifica di protocollo in BSPL è costituita da quattro elementi fondamentali:
+\begin{itemize}
+    \item L'insieme $\mathcal{R}$ dei \textbf{ruoli}, che identificano le entità logiche 
+    coinvolte nell'interazione in qualità di mittenti o destinatari dei messaggi.
+    \item L'insieme $\mathcal{P}$ dei \textbf{parametri}, che rappresentano le variabili 
+    informative scambiate durante l'esecuzione.
+    \item Un sottoinsieme $\vec{k} \subseteq \mathcal{P}$ di parametri contrassegnati come \textbf{chiavi}, deputati a distinguere univocamente le diverse 
+    istanze di esecuzione.
+    \item Un insieme $\mathcal{M}$ di riferimenti a \textbf{schemi di messaggio} o a 
+    sottoprotocolli che articolano l'interazione complessiva.
+\end{itemize}
+
+\subsubsection{Assiomi fondativi}\label{bspl:assiomi}
+
+La correttezza delle esecuzioni distribuite in BSPL si fonda su tre 
+assiomi riguardanti la gestione dei parametri e delle loro istanze:
+
+Innanzitutto, l'\textbf{unicità} impone che ogni esecuzione di un protocollo sia 
+identificata in modo univoco dai valori assegnati ai parametri che ne costituiscono la 
+chiave. A livello operativo, questo meccanismo garantisce che messaggi 
+recapitati in momenti differenti o attraverso canali asincroni distinti possano essere 
+associati con certezza alla medesima sessione di interazione. Si evita così qualsiasi 
+interferenza tra esecuzioni concorrenti senza la necessità di stabilire canali dedicati a 
+livello di trasporto o di utilizzare identificatori di sessione ad-hoc.
+
+In secondo luogo, l'\textbf{integrità} stabilisce che un'istanza di esecuzione sia 
+considerata completa solo se a tutti i parametri pubblici previsti dall'interfaccia 
+del protocollo è stato associato un valore concreto. In modo analogo ai vincoli 
+\texttt{NOT NULL} delle basi di dati relazionali, la presenza di parametri non ancora 
+vincolati indica che l'interazione è parziale e necessita di ulteriori scambi di messaggi 
+per giungere a compimento.
+
+Infine, l'\textbf{immutabilità} prescrive che, all'interno di una specifica esecuzione,
+una volta che a un parametro è stato assegnato un valore, 
+tale assegnazione non possa più essere modificata o sovrascritta. Questo vincolo ha 
+ricadute ingegneristiche fondamentali per i sistemi distribuiti: rende l'elaborazione dei 
+messaggi intrinsecamente idempotente ed immune da \emph{race condition} sui dati. Qualora 
+un messaggio venga duplicato a causa di ritrasmissioni su canali inaffidabili o venga 
+recapitato fuori ordine su canali non-FIFO, l'agente ricevente è in grado di rilevare la 
+ridondanza e preservare la consistenza del proprio stato locale senza incorrere in conflitti 
+o ambiguità.
+
+\paragraph{Esempio}\label{bspl:esempio_modello_relazionale}
+Per illustrare come BSPL applichi il modello relazionale all'esecuzione distribuita, 
+si può considerare un protocollo di acquisto (\zcref{lst:bspl_purchase}) caratterizzato dai parametri \texttt{ID}
+(che rappresenta la chiave), \texttt{item}, \texttt{price} e \texttt{receipt}.
+Ciascun agente mantiene localmente una tabella in cui ogni riga corrisponde a una specifica istanza
+di interazione, identificata in modo univoco dal valore del parametro chiave \texttt{ID}.
+
+Durante lo scambio di messaggi, la tupla associata a una determinata sessione non subisce sovrascritture 
+distruttive, ma evolve in modo puramente monotono crescente attraverso il progressivo assegnamento dei parametri.
+La \zcref{tab:bspl_relational_example} illustra lo stato locale di un agente con ruolo \textsc{Buyer} in un
+dato momento.
+
+\begin{table}[htbp]
+\centering
+\caption{Vista relazionale di un esempio di stato locale per il ruolo \textup{\textsc{Buyer}}.}
+\label{tab:bspl_relational_example}
+\begin{tabularx}{\textwidth}{l l l l >{\raggedright\arraybackslash}X}
+\toprule
+\textbf{Istanza (\texttt{ID})} & \textbf{\texttt{item}} & \textbf{\texttt{price}} & \textbf{\texttt{receipt}} & \textbf{Stato dell'enactment} \\
+\midrule
+\texttt{\#100} & \texttt{"Mouse"}    & 25\,€     & \texttt{"REC-112"} & \emph{Completo} (tupla integra) \\
+\texttt{\#101} & \texttt{"Libro"}    & 20\,€     & $\bot$             & \emph{Parziale} (in attesa di ricevuta) \\
+\texttt{\#102} & \texttt{"Tastiera"} & $\bot$    & $\bot$             & \emph{Parziale} (in attesa di offerta) \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+Considerando i tre assiomi su cui si regge BSPL in relazione alla \zcref{tab:bspl_relational_example} si può
+innanzitutto osservare che ciascuna riga rappresenta un'esecuzione indipendente del protocollo,
+distinta univocamente dalla propria chiave (\texttt{\#100}, \texttt{\#101}, \texttt{\#102}). 
+Inoltre, vale che quando un dato, come il prezzo di 20\,€ per l'istanza \texttt{\#101}, viene appreso 
+e inserito nella tabella, esso non può più essere modificato. L'evoluzione della sessione consiste
+esclusivamente nel sostituire il valore indefinito ($\bot$) dei parametri non ancora vincolati. 
+Infine, si nota che l'istanza \texttt{\#100} rappresenta un'esecuzione conclusa con successo poiché tutti 
+i parametri pubblici previsti dal protocollo risultano vincolati, mentre le istanze \texttt{\#101}
+e \texttt{\#102} descrivono sessioni ancora incomplete che necessitano di ulteriori scambi di messaggi 
+per giungere a compimento.
+
+\subsection{Sintassi}\label{bspl:sintassi}
+
+La sintassi di BSPL è concepita per essere minimale e priva di costrutti espliciti di controllo del flusso,
+come bivi o loop. Essa si articola principalmente nella caratterizzazione dei parametri, nella definizione 
+di schemi di messaggio e nella struttura di dichiarazione modulare del protocollo, suddivisa in intestazione
+e corpo.
+
+\subsubsection{Gli adornamenti dei parametri}\label{bspl:adornamenti}
+
+In assenza di costrutti espliciti per il controllo del flusso, BSPL governa la causalità e 
+la validità delle comunicazioni mediante gli \textbf{adornamenti} associati ai parametri. 
+Gli adornamenti compaiono sia all'interno dei singoli schemi di messaggio, sia nell'intestazione 
+delle dichiarazioni di protocollo.
+
+All'interno degli \textbf{schemi di messaggio}, il linguaggio definisce tre tipologie di adornamento.
+
+Innanzitutto, si ha l'adornamento \textbf{\adorn{in}}, il quale indica che il parametro 
+costituisce un prerequisito conoscitivo per l'invio del messaggio. Per poter emettere un
+messaggio contenente un parametro \adorn{in}, il ruolo mittente
+deve già conoscere il valore di tale parametro avendolo appreso da una ricezione 
+precedente o avendolo generato in un messaggio emesso in precedenza.
+
+L'adornamento \textbf{\adorn{out}} indica invece che il parametro 
+rappresenta un'informazione generata per la prima volta da quel 
+messaggio. L'invio di un messaggio con un parametro \adorn{out} possiede 
+forza dichiarativa: il mittente non si limita a trasmettere un valore, ma lo fissa in 
+modo definitivo per l'istanza corrente del protocollo. Da quel momento, il mittente, e 
+successivamente il destinatario, conoscono il dato, e nessun ruolo potrà emettere altri 
+messaggi che dichiarano lo stesso parametro con \adorn{out} per la 
+medesima chiave.
+
+Infine, l'adornamento \textbf{\adorn{nil}} specifica che il parametro
+deve essere non vincolato nello stato di conoscenza locale del mittente al momento 
+dell'emissione del messaggio.
+A differenza della semplice omissione di un parametro dallo schema del messaggio, per cui 
+la sua presenza o assenza nella conoscenza locale è ininfluente ai fini dell'invio, 
+l'uso di \adorn{nil} impedisce l'emissione qualora il mittente abbia già appreso o generato 
+tale informazione. In questo modo, il protocollo può stabilire una mutua esclusione 
+tra schemi di messaggio alternativi o subordinare l'invio alla mancata conoscenza di un dato.
+
+Nell'\textbf{intestazione di un protocollo}, gli adornamenti definiscono invece il contratto 
+d'interfaccia verso l'esterno. Un parametro dichiarato con \adorn{in} rappresenta 
+un dato che deve essere fornito dall'esterno (da un altro protocollo o dall'ambiente) affinché 
+l'interazione possa svolgersi.
+Invece, un parametro dichiarato con \adorn{out} rappresenta un dato che il protocollo
+si impegna a generare e rendere disponibile all'esterno al termine dell'esecuzione.
+
+L'intestazione impone due vincoli di buona formazione sui messaggi definiti nel corpo del protocollo:
+un parametro dichiarato \adorn{in} nell'intestazione può comparire esclusivamente 
+come \adorn{in} nei messaggi interni, poiché non può essere generato all'interno 
+del protocollo stesso; al contrario, un parametro dichiarato \adorn{out} nell'intestazione 
+deve essere generato con \adorn{out} da almeno uno schema di messaggio interno.
+
+Questa distinzione consente di identificare i \textbf{protocolli top-level}, ovvero protocolli 
+autonomi e completi, pronti per essere eseguiti direttamente da un sistema multi-agente senza 
+dipendere da informazioni esterne. Un protocollo top-level si caratterizza per avere tutti i 
+suoi parametri pubblici adornati con \adorn{out}, inclusa la chiave dell'interazione 
+generata dal ruolo che dà inizio all'interazione. Al contrario, un protocollo che presenta 
+parametri \adorn{in} nella propria intestazione costituisce un frammento non 
+autosufficiente, il quale può essere eseguito solo all'interno di una composizione che ne 
+generi i prerequisiti.
+
+\subsubsection{La visibilità dei parametri}\label{bspl:visibilita}
+
+Oltre all'adornamento, BSPL disciplina la \textbf{visibilità} dei parametri distinguendo tra
+parametri pubblici e locali.
+
+I \textbf{parametri pubblici} sono quelli dichiarati esplicitamente nella clausola \texttt{parameter} 
+dell'intestazione del protocollo. Essi definiscono l'interfaccia visibile all'esterno e concorrono 
+a stabilire la condizione di completamento dell'esecuzione.
+
+I \textbf{parametri locali}, invece, non richiedono alcuna parola chiave per essere dichiarati: sono 
+semplicemente parametri che compaiono all'interno dei messaggi nel corpo del protocollo ma vengono 
+omessi dalla lista dei parametri nell'intestazione. Nei messaggi, i parametri locali vengono 
+adornati con \adorn{in}, \adorn{out} o \adorn{nil} 
+esattamente come quelli pubblici.
+
+I parametri locali svolgono due funzioni fondamentali. 
+In primo luogo consentono ai ruoli partecipanti 
+di scambiare informazioni necessarie allo svolgimento dell'interazione (come un indirizzo di spedizione 
+\texttt{address} o un codice di tracciamento) senza esporle nell'interfaccia pubblica del protocollo, 
+preservando l'astrazione e il disaccoppiamento verso eventuali protocolli chiamanti. 
+In secondo luogo, consentono di modellare percorsi alternativi senza compromettere il completamento dell'istanza.
+In un bivio decisionale due messaggi alternativi come \texttt{accept} e \texttt{reject} possono
+produrre ciascuno informazioni diverse, come un codice di tracciamento o una motivazione di scarto.
+Poiché i parametri locali non appartengono all'interfaccia pubblica, il fatto che alcuni di essi rimangano
+non assegnati al termine dell'interazione non impedisce all'istanza del protocollo di raggiungere lo stato di
+completamento, il quale richiede unicamente l'assegnazione di tutti i parametri pubblici.
+
+\subsubsection{Il modificatore \texttt{key}}\label{bspl:key}
+Accanto agli adornamenti \texttt{in}, \texttt{out} e \texttt{nil}, BSPL introduce il modificatore \texttt{key}, il quale può essere
+utilizzato esclusivamente nell'intestazione del protocollo per qualificare uno o più parametri come chiave 
+primaria del suo schema relazionale.
+
+Come già accennato nel \zcref{bspl:assiomi}, la chiave di un protocollo è l'insieme dei parametri 
+che identificano in modo univoco ciascuna sua istanza di esecuzione: tutti i messaggi che presentano 
+la medesima combinazione di valori per i parametri chiave appartengono alla stessa sessione del protocollo.
+
+Si nota, inoltre, che uno schema di messaggio deve obbligatoriamente contenere almeno un parametro chiave del protocollo di cui fa parte,
+ma non necessariamente tutti. Quando un protocollo definisce una chiave composta da più parametri, i messaggi che
+includono soltanto una parte della chiave fissano informazioni comuni a tutte le istanze del protocollo che condividono quel valore parziale.
+Nel momento in cui l'interazione deve produrre o consumare informazioni specifiche di una singola sessione, lo schema
+del messaggio deve necessariamente includere anche i restanti parametri chiave discriminanti.
+
+\subsubsection{Schemi di messaggio}\label{bspl:schemi-messaggio}
+
+Definiti i ruoli e la qualificazione dei parametri, l'unità fondamentale di 
+comunicazione in BSPL è costituita dallo schema di messaggio.
+Uno schema di messaggio rappresenta un'interazione atomica tra due ruoli, un mittente e un 
+destinatario, e assume la forma:
+\begin{center}
+    \bsplinline{Mittente -> Destinatario: NomeMessaggio[adornamento Parametro1, ...]}
+\end{center}
+in cui ciascun parametro è specificato con il relativo adornamento (\adorn{in}, 
+\adorn{out} o \adorn{nil}).
+
+\subsubsection{Dichiarazione di un protocollo}\label{bspl:dichiarazione-protocollo}
+
+La dichiarazione di un protocollo definisce un blocco racchiuso tra parentesi graffe contenente 
+il nome del protocollo, i ruoli partecipanti (\texttt{role}), i parametri pubblici (\texttt{parameter}) 
+e il corpo del protocollo, costituito da schemi di messaggio o riferimenti ad altri protocolli.
+
+La \zcref{lst:bspl_offer} e la \zcref{lst:bspl_pay} illustrano due protocolli elementari: 
+\emph{Offer}, in cui il ruolo \textsc{Buyer} richiede un preventivo e il ruolo \textsc{Seller} 
+produce il prezzo, e \emph{Pay}, in cui il ruolo \textsc{Payer} trasferisce un importo al ruolo \textsc{Payee}.
+
+\begin{bspllisting}[caption={Dichiarazione del protocollo Offer in BSPL.}, label={lst:bspl_offer}]
+Offer {
+    role Buyer, Seller
+    parameter in ID key, out item, out price
+
+    Buyer -> Seller: rfq[in ID, out item]
+    Seller -> Buyer: quote[in ID, in item, out price]
+}
+\end{bspllisting}
+
+\begin{bspllisting}[caption={Dichiarazione del protocollo Pay in BSPL.}, label={lst:bspl_pay}]
+Pay {
+    role Payer, Payee
+    parameter in ID key, in amount, out paid
+
+    Payer -> Payee: payM[in ID, in amount, out paid]
+}
+\end{bspllisting}
+
+\subsubsection{Composizione di protocolli}\label{bspl:composizione}
+
+Il meccanismo di \textbf{composizione} consente di riutilizzare protocolli esistenti all'interno 
+di una nuova specifica mediante riferimenti espliciti nel corpo della dichiarazione. 
+La sintassi di un riferimento a un sottoprotocollo assume la forma:
+\begin{center}
+    \bsplinline{NomeSottoprotocollo(Ruolo1, ..., adornamento Parametro1, ...)}
+\end{center}
+
+All'interno della composizione i ruoli e i parametri del sottoprotocollo vengono mappati 
+rispettivamente sui ruoli e sui parametri (pubblici o locali) del protocollo chiamante.
+Poiché in BSPL l'identità di un'istanza di un protocollo è determinata unicamente dai valori delle sue chiavi,
+la grammatica impone che il sottoprotocollo condivida almeno un parametro chiave con il protocollo
+chiamante. Tale vincolo funge da meccanismo di correlazione, garantendo che i messaggi scambiati
+nel sottoprotocollo siano univocamente associati alla medesima sessione di esecuzione del protocollo principale.
+
+La \zcref{lst:bspl_purchase} mostra un esempio concreto di composizione: il protocollo top-level 
+\emph{Purchase} integra i sottoprotocolli \emph{Offer} e \emph{Pay}, completando l'acquisto con
+l'invio di una ricevuta per l'acquisto da parte del \textsc{Seller} tramite il messaggio \texttt{receiptM}.
+
+\begin{bspllisting}[caption={Dichiarazione del protocollo composito Purchase in BSPL.}, label={lst:bspl_purchase}]
+Purchase {
+    role Buyer, Seller
+    parameter out ID key, out item, out price, out receipt
+
+    Buyer -> Seller: init[out ID]
+    Offer(Buyer, Seller, in ID, out item, out price)
+    Pay(Buyer, Seller, in ID, in price, out paid)
+    Seller -> Buyer: receiptM [in ID, in price, in paid, out receipt]
+}
+\end{bspllisting}
+
+Nella \zcref{lst:bspl_purchase}, il protocollo \emph{Purchase} associa il parametro \texttt{price} 
+generato come \adorn{out} da \emph{Offer} al parametro \texttt{amount} 
+richiesto come \adorn{in} da \emph{Pay}. 
+In questo modo, la corretta sequenza operativa tra l'offerta e il pagamento scaturisce 
+automaticamente e unicamente dalla disponibilità del dato \texttt{price}: \emph{Pay} non potrà 
+essere eseguito prima che \emph{Offer} abbia prodotto tale valore. La composizione rispetta 
+l'incapsulamento, poiché \emph{Purchase} interagisce con i sottoprotocolli esclusivamente attraverso 
+le loro interfacce pubbliche.
+
+\subsection{Semantica operazionale}\label{bspl:semantica}
+
+Nei sistemi distribuiti asincroni non esiste una memoria globale condivisa né un'autorità centrale
+in grado di coordinare i partecipanti. Di conseguenza, la semantica operazionale di BSPL descrive
+l'esecuzione di un protocollo dal punto di vista decentralizzato dei singoli agenti, basandosi
+esclusivamente sulle informazioni apprese localmente da ciascun ruolo durante lo scambio di messaggi \autocite{singh2012semantics}.
+
+\subsubsection{Storia locale e stato di conoscenza locale}\label{bspl:stato_locale}
+
+Durante l'esecuzione, un agente che ricopre un determinato ruolo $x \in \mathcal{R}$ non ha visibilità
+sulle comunicazioni che avvengono tra gli altri partecipanti. L'agente percepisce l'interazione unicamente
+attraverso gli eventi comunicativi a cui prende parte direttamente. L'insieme dei messaggi che il ruolo
+$x$ ha personalmente inviato o ricevuto costituisce la sua \textbf{storia locale} $\mathcal{H}_x$.
+
+A partire dalla propria storia locale, l'agente costruisce il proprio \textbf{stato di conoscenza locale}
+$\mathcal{K}_x$. Per ciascuna istanza di interazione, identificata dal valore della chiave $\vec{k}$,
+lo stato $\mathcal{K}_x$ memorizza i valori assegnati ai parametri che il ruolo ha appreso fino a quel
+momento. Se un parametro non è ancora comparso in alcun messaggio inviato o ricevuto da $x$ per la
+chiave $\vec{k}$, il suo valore per quell'agente rimane indefinito ($\bot$).
+
+In questo modo, la valutazione della liceità delle azioni non richiede alcuna sincronizzazione globale:
+ciascun agente determina in modo del tutto autonomo quali messaggi è abilitato a inviare o può attendersi
+di ricevere basandosi unicamente sulle informazioni presenti nel proprio stato di conoscenza locale.
+
+\subsubsection{Regole di viabilità per emissione e ricezione dei messaggi}\label{bspl:viabilita}
+
+Il concetto cardine che disciplina l'invio e la ricezione dei messaggi in BSPL è la 
+\textbf{viabilità} (\emph{viability}), la quale stabilisce se un evento comunicativo sia 
+formalmente consentito dallo stato di conoscenza locale dell'agente.
+
+L'\textbf{emissione} di un messaggio $m$ da parte di un ruolo mittente $x$ verso un destinatario $y$, 
+relativamente a una sessione identificata dalla chiave $\vec{k}$, è viabile se e solo se sono 
+soddisfatte simultaneamente due condizioni su $\mathcal{K}_x$:
+\begin{enumerate}
+    \item Il mittente $x$ deve già conoscere il valore 
+    di tutti i parametri adornati con \adorn{in} nello schema di $m$ per la 
+    chiave $\vec{k}$, ovvero tali parametri devono essere vincolati in $\mathcal{K}_x$.
+    \item Il mittente $x$ non deve conoscere alcun valore 
+    per i parametri adornati con \adorn{out} o con \adorn{nil} 
+    nello schema di $m$ per la chiave $\vec{k}$, ossia tali parametri devono risultare non vincolati in $\mathcal{K}_x$.
+\end{enumerate}
+
+La prima condizione assicura il rispetto delle dipendenze causali: un agente non può trasmettere un dato che non possiede. 
+La seconda condizione preserva l'assioma di immutabilità: se $x$ conoscesse già un parametro \adorn{out}, 
+l'invio del messaggio costituirebbe una riassegnazione incompatibile con l'unicità del valore nella sessione.
+
+Nel momento in cui avviene l'invio del messaggio, $x$ genera i valori per ciascun parametro \adorn{out} 
+e li inserisce immediatamente in $\mathcal{K}_x$. Da questo istante, la seconda condizione di viabilità 
+impedirà qualsiasi altro invio da parte di $x$ che tenti di riassegnare quegli stessi 
+parametri per la chiave $\vec{k}$.
+
+La \textbf{ricezione} di un messaggio $m$ da parte del destinatario $y$ è invece un'operazione \textbf{incondizionata},
+ovvero sempre viabile a livello di semantica formale.
+All'atto della ricezione, $y$ incorpora i valori contenuti nel messaggio all'interno del proprio stato locale 
+$\mathcal{K}_y$, vincolando i parametri che prima risultavano indefiniti. L'arricchimento di $\mathcal{K}_y$ può 
+quindi abilitare a sua volta l'emissione di successivi messaggi da parte di $y$, qualora i parametri ricevuti soddisfino 
+i requisiti \adorn{in} di altri schemi di messaggio.
+
+\subsubsection{Monotonicità della conoscenza}\label{bspl:monotonicita}
+
+Una conseguenza importante delle regole di viabilità e dell'assioma di immutabilità è la 
+\textbf{monotonicità} dell'evoluzione dello stato locale: sia l'invio che la ricezione di un messaggio 
+possono unicamente aggiungere nuove informazioni alla conoscenza dell'agente, senza mai sovrascrivere o 
+cancellare i dati già appresi.
+
+La crescita monotona garantisce che le decisioni locali degli agenti siano stabili nel tempo. 
+Una volta che un agente ha appreso i parametri \adorn{in} necessari ad abilitare un messaggio, 
+tale condizione di abilitazione non può essere revocata da eventi asincroni successivi.
+
+Questo modello offre due importanti vantaggi architetturali.
+Innanzitutto, gli agenti possono operare in modo del tutto autonomo e disaccoppiato nel tempo. 
+Poiché lo stato di conoscenza locale non rischia di essere invalidato da azioni 
+concorrenti, un ruolo è autorizzato a emettere un messaggio nel momento esatto 
+in cui questo diviene viabile localmente, senza dover implementare protocolli 
+di sincronizzazione preventiva, negoziare permessi o acquisire blocchi 
+sullo stato degli altri nodi. 
+Inoltre, nei sistemi transazionali tradizionali, la concorrenza 
+e la gestione delle eccezioni richiedono costosi protocolli di coordinamento 
+globale, come il \emph{Two-Phase Commit}, o complesse logiche di ripristino per annullare 
+mutazioni di stato inconsistenti. In BSPL, l'esecuzione modella l'interazione come la progressiva 
+popolazione di una tupla relazionale. Anche la gestione di esiti negativi o rami di 
+scarto (come un messaggio di \emph{reject}) non cancella i dati precedentemente 
+stabiliti, ma progredisce vincolando parametri previsti dal protocollo. 
+Evolvendo l'interazione unicamente per accumulo di informazione, si elimina 
+alla radice la necessità di ritrattare comunicazioni o ripristinare stati pregressi.
+
+\subsection{Architettura dell'agente}\label{bspl:architettura_agente}
+
+La semantica operazionale di BSPL si traduce a livello implementativo in una netta separazione 
+delle responsabilità all'interno di ciascun nodo partecipante. Nel modello architetturale Local State Transfer
+(LoST) \autocite{singh2011lost}, un agente non è strutturato come un blocco monolitico, 
+ma si articola in due componenti disaccoppiati: l'\textbf{adattatore di protocollo} e la \textbf{logica di business}.
+
+\subsubsection{Adattatore}\label{bspl:adattatore}
+
+L'adattatore di protocollo agisce come uno strato di \emph{middleware} interposto tra 
+l'infrastruttura di comunicazione e l'applicazione dell'agente. 
+Questo componente opera in modo generico e indipendente dallo specifico dominio applicativo,
+avendo come responsabilità principale quella di gestire l'invio e la ricezione dei messaggi
+sul canale di trasporto, aggiornando lo stato di conoscenza locale. 
+L'adattatore si occupa, inoltre, di applicare le regole di viabilità, impedendo l'emissione 
+di messaggi privi dei necessari prerequisiti \adorn{in} o in conflitto con
+parametri \adorn{out} già vincolati. 
+Infine, esso espone un'interfaccia verso l'interno dell'agente, notificando l'acquisizione di
+nuove informazioni o l'abilitazione di nuove comunicazioni.
+
+\subsubsection{Logica di business}\label{bspl:logica}
+
+La logica di business, al contrario, costituisce il modulo privato dell'agente. 
+Essa racchiude i processi decisionali e gli algoritmi di calcolo, 
+avendo come unica responsabilità la generazione dei valori da assegnare ai parametri \adorn{out}. 
+La logica interna non gestisce la conformità al protocollo né le dinamiche di trasporto: quando 
+intende compiere un'azione comunicativa, delega l'emissione all'adattatore fornendogli i dati elaborati.
+
+Questo disaccoppiamento garantisce che l'adattatore sia un modulo interamente riutilizzabile su 
+qualsiasi specifica BSPL. Inoltre, protegge il sistema distribuito da malfunzionamenti interni: 
+se la logica di business tenta un'azione non consentita, l'adattatore la blocca localmente, 
+evitando che violazioni del protocollo si propaghino sulla rete.
+
+
+\subsubsection{Struttura dei dati}\label{bspl:struttura-dati}
+
+Per gestire lo stato di conoscenza locale, l'adattatore non mantiene una tabella globale 
+del protocollo. Al contrario, memorizza una \textbf{relazione locale} $R(m)$ 
+per ciascuno schema di messaggio $m$ in cui il ruolo partecipa come mittente o destinatario \autocite{singh2011lost}.
+In questo modo, lo stato di conoscenza corrisponde all'insieme delle tuple
+memorizzate nelle relazioni locali gestite dall'adattatore.
+
+È opportuno evidenziare la distinzione tra la vista logica del protocollo e la sua materializzazione fisica all'interno dell'adattatore. Se
+a livello concettuale lo stato dell'interazione viene descritto come un'unica tabella che raccoglie tutti i parametri per ciascuna
+sessione, a livello implementativo l'adattatore non memorizza direttamente tale relazione globale. Una tabella unificata, infatti,
+costringerebbe l'adattatore a eseguire continui aggiornamenti distruttivi per rimpiazzare i valori indefiniti a ogni nuova
+informazione appresa, oltre a risultare inadatta a gestire i rami alternativi o i messaggi a cui il ruolo non prende parte. Al contrario,
+materializzare una relazione locale dedicata per ciascuno schema di messaggio consente di gestire lo stato esclusivamente tramite puri
+inserimenti di tuple immutabili, rispecchiando la natura incrementale della conoscenza. In questa architettura, la tabella complessiva del 
+protocollo rappresenta unicamente una vista logica derivata, ottenibile combinando le singole relazioni locali attraverso le relative chiavi
+di sessione.
+
+\paragraph{Esempio}
+
+Per comprendere come la vista logica sullo stato dell'interazione introdotta nella \zcref{tab:bspl_relational_example} (riferita all'esempio nel \zcref{bspl:esempio_modello_relazionale})
+venga materializzata a livello fisico, si consideri il medesimo protocollo di acquisto (\zcref{lst:bspl_purchase}) dal punto di vista dell'adattatore del ruolo \textsc{Buyer}.
+L'interazione per \textsc{Buyer} si articola negli schemi di messaggio seguenti: l'invio dell'inizializzazione \bsplinline{init[out ID]}, l'invio della richiesta \bsplinline{rfq[in ID, out item]},
+la ricezione del preventivo \bsplinline{quote[in ID, in item, out price]}, l'invio del pagamento \bsplinline{payM[in ID, in price, out paid]} e la ricezione della ricevuta finale 
+\bsplinline{receiptM[in ID, in price, in paid, out receipt]}.
+
+L'adattatore di \textsc{Buyer} non memorizza una tabella sparsa con valori indefiniti, ma materializza cinque diverse relazioni locali,
+una per ogni schema di messaggio in cui è coinvolto, illustrate nella \zcref{tab:bspl_physical_example}.
+
+\begin{table}[htbp]
+\centering
+\small
+\caption{Materializzazione fisica delle relazioni locali nell'adattatore di \textup{\textsc{Buyer}}.}
+\label{tab:bspl_physical_example}
+
+% --- Prima riga ---
+\begin{subtable}[t]{0.26\textwidth}
+\centering
+\caption*{$R(\text{init})$}
+\begin{tabular}{l}
+\toprule
+\textbf{\texttt{ID}} \\
+\midrule
+\texttt{\#100} \\
+\texttt{\#101} \\
+\texttt{\#102} \\
+\bottomrule
+\end{tabular}
+\end{subtable}
+\hfill
+\begin{subtable}[t]{0.34\textwidth}
+\centering
+\caption*{$R(\text{rfq})$}
+\begin{tabular}{ll}
+\toprule
+\textbf{\texttt{ID}} & \textbf{\texttt{item}} \\
+\midrule
+\texttt{\#100} & \texttt{"Mouse"} \\
+\texttt{\#101} & \texttt{"Libro"} \\
+\texttt{\#102} & \texttt{"Tastiera"} \\
+\bottomrule
+\end{tabular}
+\end{subtable}
+\hfill
+\begin{subtable}[t]{0.34\textwidth}
+\centering
+\caption*{$R(\text{quote})$}
+\begin{tabular}{llr}
+\toprule
+\textbf{\texttt{ID}} & \textbf{\texttt{item}} & \textbf{\texttt{price}} \\
+\midrule
+\texttt{\#100} & \texttt{"Mouse"} & 25\,€ \\
+\texttt{\#101} & \texttt{"Libro"} & 20\,€ \\
+\bottomrule
+\end{tabular}
+\end{subtable}
+
+\vspace{1.5em} % Spaziatura verticale tra le due righe
+
+% --- Seconda riga ---
+\begin{subtable}[t]{0.48\textwidth}
+\centering
+\caption*{$R(\text{payM})$}
+\begin{tabular}{lcr}
+\toprule
+\textbf{\texttt{ID}} & \textbf{\texttt{price}} & \textbf{\texttt{paid}} \\
+\midrule
+\texttt{\#100} & 25\,€ & \texttt{true} \\
+\bottomrule
+\end{tabular}
+\end{subtable}
+\hfill
+\begin{subtable}[t]{0.48\textwidth}
+\centering
+\caption*{$R(\text{receiptM})$}
+\begin{tabular}{lccr}
+\toprule
+\textbf{\texttt{ID}} & \textbf{\texttt{price}} & \textbf{\texttt{paid}} & \textbf{\texttt{receipt}} \\
+\midrule
+\texttt{\#100} & 25\,€ & \texttt{true} & \texttt{"REC-112"} \\
+\bottomrule
+\end{tabular}
+\end{subtable}
+
+\end{table}
+
+Confrontando la \zcref{tab:bspl_physical_example} con la vista logica della \zcref{tab:bspl_relational_example}, si nota
+che ciascuna relazione locale contiene unicamente tuple popolate con valori definiti per i
+messaggi effettivamente scambiati. 
+Ad esempio, la chiave \texttt{\#102} non è presente nelle relazioni $R(quote)$ e $R(receiptM)$ poiché i relativi messaggi non 
+hanno ancora avuto luogo.
+Quando poi l'agente riceverà l'offerta per l'istanza \texttt{\#102} (ad esempio a 45\,€), l'adattatore
+eseguirà un semplice inserimento della tupla \texttt{(\#102, "Tastiera", 45\,€)} nella tabella $R(quote)$, senza 
+dover effettuare operazioni di modifica in-place sulle altre tabelle.
+
+\subsubsection{Operatività dell'adattatore}\label{bspl:operativita-adattatore}
+
+Quando l'agente invia o riceve un messaggio di schema $m$, l'adattatore deve aggiungere la tupla $t$ 
+corrispondente in $R(m)$, per aggiornare lo stato di conoscenza locale.
+Tale aggiunta viene effettuata sempre sfruttando una medesima procedura di \textbf{inserimento locale},
+la quale, innanzitutto, verifica che i parametri chiave
+siano definiti e che non vi siano conflitti di consistenza: relativamente ai parametri condivisi
+da $R(m)$ con altre relazioni locali $R(n)$, $t$ deve presentare valori identici a quelli delle tuple
+già registrate in $R(n)$ che hanno la sua stessa chiave.
+Se queste prime verifiche hanno esito positivo, la procedura controlla che la tupla $t$ non sia già presente
+in $R(m)$, ed in caso affermativo la scarta come duplicato senza sollevare
+errori né inoltrare notifiche ridondanti alla logica di business.
+Diversamente, se la tupla $t$ non era stata già precedentemente inserita, l'adattatore la aggiunge a $R(m)$.
+
+Di seguito si illustrano nel dettaglio le modalità con cui l'adattatore gestisce la ricezione e l'emissione dei messaggi. 
+
+\paragraph{Gestione della ricezione}
+A livello di semantica formale, come discusso nel \zcref{bspl:viabilita}, la ricezione 
+di un messaggio è incondizionata: un agente non necessita di prerequisiti 
+informativi pregressi per accogliere nuovi dati. Tuttavia, in un'architettura 
+distribuita ed asincrona concreta, i canali di comunicazione possono essere inaffidabili, 
+comportare ritardi arbitrari, recapiti fuori ordine o duplicazioni di pacchetti.
+
+Per questa ragione, l'adattatore, all'arrivo 
+di un messaggio $t$ relativo allo schema $m$ dal canale di trasporto, non lo riversa 
+direttamente nello stato locale, ma ne verifica la conformità allo schema e in seguito
+tenta la procedura di inserimento locale in $R(m)$, durante la quale vengono effettuati dei
+controlli ulteriori.
+Infine, se l'inserimento ha successo, e dunque il messaggio è valido e non
+è un duplicato, l'adattatore notifica la logica di business dell'agente, rendendo 
+disponibili i nuovi valori appresi.
+
+\paragraph{Gestione dell'emissione}
+Quando invece la logica di business decide di inviare un messaggio di schema $m$, passa all'adattatore la chiave dell'interazione di riferimento
+unitamente ai valori calcolati per i relativi parametri \adorn{out}.
+Quest'ultimo procede innanzitutto interrogando le relazioni locali per verificare che tutti i parametri \adorn{in}
+di $m$ siano già noti per la specifica chiave e che nessun parametro \adorn{out}
+o \adorn{nil} risulti già vincolato. 
+Se entrambe le verifiche hanno successo, l'adattatore esegue l'inserimento locale della tupla $t$ in $R(m)$,
+e trasmette il messaggio sul canale di trasporto. 
+In caso contrario, respinge l'invio sollevando un'eccezione locale ed evitando la trasmissione di comunicazioni illegali.
+
+\subsection{Un esempio di protocollo}\label{bspl:esempio-finale}
+
+A completamento della trattazione su BSPL, viene ora presentato un protocollo di riferimento 
+denominato \emph{PurchaseWithDelivery}, tratto dalla letteratura su LoST \autocite{singh2011lost}. 
+
+La specifica in questione coinvolge tre ruoli distinti: \textsc{Buyer}, \textsc{Seller} e \textsc{Shipper}. 
+I suoi parametri pubblici sono \texttt{ID} (la chiave primaria dell'interazione), \texttt{item} (l'articolo richiesto), 
+\texttt{price} (il prezzo quotato) e \texttt{outcome} (l'esito finale della transazione). 
+La dichiarazione include inoltre due parametri locali: \texttt{address}, che contiene le informazioni di spedizione, 
+e \texttt{response}, utilizzato per gestire la mutua esclusione tra accettazione e rifiuto.
+
+Il protocollo modella una transazione commerciale a tre parti che include una fase iniziale di negoziazione, dove \textsc{Buyer}
+interroga \textsc{Seller}, ottenendo il prezzo per un determinato prodotto, e una fase di scelta, dove \textsc{Buyer} comunica a 
+\textsc{Seller} la sua volontà di acquistare o meno il prodotto. Infine, se \textsc{Buyer} sceglie di comprare il prodotto
+ha luogo anche una fase finale di consegna che coinvolge la terza parte \textsc{Shipper}.
+
+La \zcref{lst:bspl_purchasewithdelivery} riporta la dichiarazione del protocollo in BSPL.
+
+\begin{bspllisting}[caption={Dichiarazione del protocollo PurchaseWithDelivery in BSPL.}, label={lst:bspl_purchasewithdelivery}]
+PurchaseWithDelivery {
+    role Buyer, Seller, Shipper
+    parameter out ID key, out item, out price, out outcome
+
+    Buyer -> Seller: rfq[out ID, out item]
+    Seller -> Buyer: quote[in ID, in item, out price]
+    Buyer -> Seller: accept[in ID, in item, in price, out address, out response]
+    Buyer -> Seller: reject[in ID, in item, in price, out outcome, out response]
+
+    Seller -> Shipper: ship[in ID, in item, in address]
+    Shipper -> Buyer: deliver[in ID, in item, in address, out outcome]
+}
+\end{bspllisting}
+
+\subsubsection{Scelta locale e mutua esclusione}\label{bspl:scelta-locale}
+
+Uno degli aspetti più rilevanti di questo protocollo risiede nella gestione del bivio decisionale tra accettazione 
+e rifiuto dell'offerta, che esemplifica il pattern di \textbf{scelta locale} di BSPL \autocite{singh2011bspl}.
+
+Nei protocolli tradizionali basati sul controllo del flusso, la gestione di decisioni alternative distribuite tra 
+partecipanti distinti rischia di generare situazioni in cui nodi diversi 
+intraprendono percorsi incompatibili all'insaputa l'uno dell'altro.
+
+In BSPL, una scelta tra opzioni mutuamente esclusive viene espressa definendo dei messaggi alternativi 
+che condividono i medesimi parametri \adorn{in} e almeno un parametro \adorn{out}, ed affidandone l'emissione allo stesso ruolo.
+Nel protocollo \emph{PurchaseWithDelivery}, sia \texttt{accept} che \texttt{reject} richiedono come parametri \adorn{in} 
+\texttt{ID}, \texttt{item} e \texttt{price}, e come parametro \adorn{out} \texttt{response}.
+
+Poiché entrambi i messaggi hanno come mittente \textsc{Buyer}, l'invio di uno dei due vincola istantaneamente il 
+valore di \texttt{response} nello stato di conoscenza locale dell'acquirente. 
+In base alle regole di viabilità, la presenza dell'assegnamento per \texttt{response} rende impossibile
+un successivo invio di un messaggio \texttt{accept} o \texttt{reject}.
+In questo modo, la mutua esclusione viene garantita localmente, senza richiedere
+meccanismi di sincronizzazione o negoziazione con gli altri partecipanti.
+
+\subsubsection{History Vector}\label{bspl:history-vector}
+
+Un'istanza di esecuzione di un protocollo distribuito definito con BSPL è formalmente 
+modellata attraverso il concetto di \textbf{history vector} \autocite{singh2011lost}.
+
+Dato un insieme di ruoli $\mathcal{R} = \{x_1, \dots, x_n\}$, un \emph{history vector} $\vec{H}$ è 
+definito come un vettore:
+\begin{equation}
+    \vec{H} = [\mathcal{H}_{x_1}, \dots, \mathcal{H}_{x_n}]
+\end{equation}
+dove ciascun elemento $\mathcal{H}_{x}$ è la storia locale del ruolo $x$, ossia la sequenza ordinata di messaggi inviati e ricevuti da $x$ nel corso di una specifica esecuzione.
+
+Un \emph{history vector} è valido se rispetta due vincoli fondamentali.
+In primo luogo, se un messaggio compare come ricevuto nella storia locale
+di un destinatario, deve essere già stato inviato dal rispettivo mittente.
+In secondo luogo, se un messaggio compare come inviato all'interno di una 
+storia locale, deve risultare viabile rispetto alla conoscenza accumulata
+dall'agente fino a quel momento.
+
+La \zcref{fig:esempio_history_vec} illustra un esempio di \emph{history vector} per il protocollo \emph{PurchaseWithDelivery},
+relativo a una possibile esecuzione in cui \textsc{Buyer} accetta l'offerta e riceve la merce ordinata.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.7\textwidth]{diagrams/esempio_history_vector.pdf}
+    \caption{Esempio di esecuzione del protocollo PurchaseWithDelivery tramite history vector.}
+    \label{fig:esempio_history_vec}
+\end{figure}
+
+L'esecuzione di \emph{PurchaseWithDelivery} mostrata nel diagramma si svolge nei seguenti passi:
+\begin{enumerate}
+    \item \textsc{Buyer} invia \texttt{rfq}, generando i valori di \texttt{ID} e \texttt{item}.
+    \item \textsc{Seller} riceve \texttt{rfq} e risponde inviando \texttt{quote} con il parametro \texttt{price}.
+    \item \textsc{Buyer} riceve \texttt{quote} e invia \texttt{accept}, producendo \texttt{address} e \texttt{response}.
+    \item \textsc{Seller} riceve \texttt{accept} e inoltra \texttt{ship} al corriere \textsc{Shipper}, trasmettendo \texttt{ID}, \texttt{item} e \texttt{address}.
+    \item \textsc{Shipper} riceve \texttt{ship} e conclude l'interazione inviando \texttt{deliver} a \textsc{Buyer}, producendo il parametro \texttt{outcome}.
+\end{enumerate}
+
+Come si può notare, ciascun partecipante avanza nella propria storia locale unicamente in base ai dati che riceve o genera, 
+senza richiedere una sequenza temporale globale condivisa.
