@@ -81,6 +81,7 @@ PurchaseWithDelivery {
 ```
 .
 ├── config.py                 # Endpoint e porte dei nodi ibridi (8001, 8002, 8003)
+├── LICENSE                   # Licenza open-source MIT
 ├── main.py                   # Simulazione del protocollo e ispezione relazioni LoST
 ├── pytest.ini                # Configurazione per pytest-asyncio
 ├── requirements.txt          # Dipendenze Python (mcp>=2.0.0, uvicorn, pytest)
