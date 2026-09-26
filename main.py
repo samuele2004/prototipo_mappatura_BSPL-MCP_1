@@ -133,15 +133,15 @@ async def run_choreography_scenario():
         print("=" * 75)
 
         print("\n[BUYER RELATIONS]:")
-        for rel_name, table in buyer.relations.items():
+        for rel_name, table in buyer.adapter.relations.items():
             print(f"  R({rel_name}): {json.dumps(table.get(tx_id, {}), ensure_ascii=False)}")
 
         print("\n[SELLER RELATIONS]:")
-        for rel_name, table in seller.relations.items():
+        for rel_name, table in seller.adapter.relations.items():
             print(f"  R({rel_name}): {json.dumps(table.get(tx_id, {}), ensure_ascii=False)}")
 
         print("\n[SHIPPER RELATIONS]:")
-        for rel_name, table in shipper.relations.items():
+        for rel_name, table in shipper.adapter.relations.items():
             print(f"  R({rel_name}): {json.dumps(table.get(tx_id, {}), ensure_ascii=False)}")
         print("=" * 75)
 
@@ -151,9 +151,9 @@ async def run_choreography_scenario():
         print("\n" + "=" * 75)
         print(f"  HISTORY VECTOR DISTRIBUITO H = [H_Buyer, H_Seller, H_Shipper] (ID='{tx_id}')")
         print("=" * 75)
-        print(f"  H_Buyer:   {list(buyer.get_history(tx_id).keys())}")
-        print(f"  H_Seller:  {list(seller.get_history(tx_id).keys())}")
-        print(f"  H_Shipper: {list(shipper.get_history(tx_id).keys())}")
+        print(f"  H_Buyer:   {list(buyer.adapter.get_history(tx_id).keys())}")
+        print(f"  H_Seller:  {list(seller.adapter.get_history(tx_id).keys())}")
+        print(f"  H_Shipper: {list(shipper.adapter.get_history(tx_id).keys())}")
         print("=" * 75 + "\n")
 
         # ------------------------------------------------------------------

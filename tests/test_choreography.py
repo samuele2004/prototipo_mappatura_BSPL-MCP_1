@@ -97,9 +97,9 @@ async def test_purchase_happy_path(running_environment):
     assert shipper.r_deliver[tx_id]["outcome"] == "delivered"
 
     # Verifica History Vector distribuito H = [H_Buyer, H_Seller, H_Shipper]
-    assert set(buyer.get_history(tx_id).keys()) == {"rfq", "quote", "accept", "deliver"}
-    assert set(seller.get_history(tx_id).keys()) == {"rfq", "quote", "accept", "ship"}
-    assert set(shipper.get_history(tx_id).keys()) == {"ship", "deliver"}
+    assert set(buyer.adapter.get_history(tx_id).keys()) == {"rfq", "quote", "accept", "deliver"}
+    assert set(seller.adapter.get_history(tx_id).keys()) == {"rfq", "quote", "accept", "ship"}
+    assert set(shipper.adapter.get_history(tx_id).keys()) == {"ship", "deliver"}
 
 
 @pytest.mark.asyncio
@@ -218,7 +218,7 @@ async def test_viability_emission_check(running_environment):
     # 3. Verifica controllo parametri [nil]: se un parametro nil è vincolato, l'emissione deve fallire
     with pytest.raises(BSPLViabilityError) as exc_info3:
         # simuliamo un controllo di viabilità con nil_params=["item"] (dove item è già noto)
-        buyer.check_viability(ID=tx_id, nil_params=["item"])
+        buyer.adapter.check_viability(ID=tx_id, nil_params=["item"])
     assert "parametro [nil]" in str(exc_info3.value)
 
 

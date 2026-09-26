@@ -2,7 +2,7 @@
 Implementazione del ruolo 'Buyer' per il protocollo BSPL PurchaseWithDelivery.
 
 Definizione del ruolo nel protocollo:
-- Relazioni Locali LoST:
+- Relazioni Locali LoST gestite da self.adapter:
   * R(rfq):     [ID, item]
   * R(quote):   [ID, item, price]
   * R(accept):  [ID, item, price, address, response]
@@ -23,7 +23,8 @@ from typing import Annotated, Any, Dict
 from pydantic import Field
 from mcp import Client
 from config import BUYER_HOST, BUYER_PORT, SELLER_URL
-from roles.base import BaseRoleNode, BSPLExecutionError
+from roles.base import BaseRoleNode
+from roles.exceptions import BSPLExecutionError
 
 logger = logging.getLogger("Buyer")
 
@@ -32,35 +33,35 @@ class BuyerNode(BaseRoleNode):
     """
     Nodo ibrido per il ruolo Buyer.
     Gestisce le relazioni locali R(rfq), R(quote), R(accept), R(reject), R(deliver),
-    i tool di ricezione e i metodi di emissione con verifiche formali LoST.
+    i tool di ricezione e i metodi di emissione con verifiche formali LoST tramite self.adapter.
     """
 
     def __init__(self, host: str = BUYER_HOST, port: int = BUYER_PORT):
         super().__init__(name="Buyer", host=host, port=port)
 
     # ----------------------------------------------------------------------
-    # Proprietà di accesso rapido alle relazioni locali
+    # Proprietà di accesso rapido alle relazioni locali dell'adattatore
     # ----------------------------------------------------------------------
 
     @property
     def r_rfq(self) -> Dict[str, Dict[str, Any]]:
-        return self.relations.setdefault("rfq", {})
+        return self.adapter.relations.setdefault("rfq", {})
 
     @property
     def r_quote(self) -> Dict[str, Dict[str, Any]]:
-        return self.relations.setdefault("quote", {})
+        return self.adapter.relations.setdefault("quote", {})
 
     @property
     def r_accept(self) -> Dict[str, Dict[str, Any]]:
-        return self.relations.setdefault("accept", {})
+        return self.adapter.relations.setdefault("accept", {})
 
     @property
     def r_reject(self) -> Dict[str, Dict[str, Any]]:
-        return self.relations.setdefault("reject", {})
+        return self.adapter.relations.setdefault("reject", {})
 
     @property
     def r_deliver(self) -> Dict[str, Dict[str, Any]]:
-        return self.relations.setdefault("deliver", {})
+        return self.adapter.relations.setdefault("deliver", {})
 
     # ----------------------------------------------------------------------
     # Tool MCP Esposti (Ricezione messaggi BSPL)
@@ -83,15 +84,15 @@ class BuyerNode(BaseRoleNode):
             params = {"ID": ID, "item": item, "price": price}
 
             # 1. Verifica di consistenza semantica (immutabilità BSPL)
-            self.check_consistency(ID, params)
+            self.adapter.check_consistency(ID, params)
 
             # 2. Controllo duplicati (idempotenza)
-            if self.is_duplicate("quote", ID, params):
+            if self.adapter.is_duplicate("quote", ID, params):
                 logger.info(f"[Buyer] Messaggio 'quote' già registrato per ID={ID!r} (duplicato idempotente)")
                 return f"Quote già registrata per ID={ID}."
 
             # 3. Inserimento nella relazione locale R(quote)
-            self.insert_relation("quote", ID, params)
+            self.adapter.insert_relation("quote", ID, params)
 
             # 4. Notifica evento per sincronizzazione reattiva
             self._notify_message_received("quote", ID)
@@ -113,15 +114,15 @@ class BuyerNode(BaseRoleNode):
             params = {"ID": ID, "item": item, "address": address, "outcome": outcome}
 
             # 1. Verifica di consistenza semantica (immutabilità BSPL)
-            self.check_consistency(ID, params)
+            self.adapter.check_consistency(ID, params)
 
             # 2. Controllo duplicati (idempotenza)
-            if self.is_duplicate("deliver", ID, params):
+            if self.adapter.is_duplicate("deliver", ID, params):
                 logger.info(f"[Buyer] Messaggio 'deliver' già registrato per ID={ID!r} (duplicato idempotente)")
                 return f"Consegna già registrata per ID={ID}."
 
             # 3. Inserimento nella relazione locale R(deliver)
-            self.insert_relation("deliver", ID, params)
+            self.adapter.insert_relation("deliver", ID, params)
 
             # 4. Notifica evento di consegna
             self._notify_message_received("deliver", ID)
@@ -138,12 +139,12 @@ class BuyerNode(BaseRoleNode):
         Invia una Request For Quote (RFQ) al Seller generando ID e item.
         """
         # 1. Verifica di viabilità LoST: ID e item sono parametri out (non devono essere già noti)
-        self.check_viability(ID, out_params=["ID", "item"])
+        self.adapter.check_viability(ID, out_params=["ID", "item"])
 
         params = {"ID": ID, "item": item}
 
         # 2. Inserimento locale nella relazione R(rfq)
-        self.insert_relation("rfq", ID, params)
+        self.adapter.insert_relation("rfq", ID, params)
 
         logger.info(f"[Buyer -> Seller] Invocazione Tool 'rfq': ID={ID!r}, item={item!r}")
         try:
@@ -152,11 +153,11 @@ class BuyerNode(BaseRoleNode):
                 if result.is_error:
                     error_msg = str(result.content)
                     logger.error(f"❌ [Buyer] Errore dal server Seller su 'rfq': {error_msg}")
-                    self.remove_relation("rfq", ID)
+                    self.adapter.remove_relation("rfq", ID)
                     raise BSPLExecutionError(f"Errore remoto su 'rfq': {error_msg}")
                 logger.info(f"[Buyer] Risposta per 'rfq': {result.content}")
         except Exception:
-            self.remove_relation("rfq", ID)
+            self.adapter.remove_relation("rfq", ID)
             raise
 
     async def send_accept(
@@ -171,7 +172,7 @@ class BuyerNode(BaseRoleNode):
         I parametri [in] (ID, item, price) vengono verificati e risolti dallo stato locale.
         """
         # 1. Verifica di viabilità LoST sui nomi dei parametri
-        in_values = self.check_viability(
+        in_values = self.adapter.check_viability(
             ID,
             in_params=["ID", "item", "price"],
             out_params=["address", "response"],
@@ -180,7 +181,7 @@ class BuyerNode(BaseRoleNode):
         params = {**in_values, "address": address, "response": response}
 
         # 2. Inserimento locale nella relazione R(accept)
-        self.insert_relation("accept", ID, params)
+        self.adapter.insert_relation("accept", ID, params)
 
         await asyncio.sleep(0.05)
         logger.info(f"[Buyer -> Seller] Invocazione Tool 'accept': ID={ID!r}, address={address!r}, response={response!r}")
@@ -190,11 +191,11 @@ class BuyerNode(BaseRoleNode):
                 if result.is_error:
                     error_msg = str(result.content)
                     logger.error(f"❌ [Buyer] Errore dal server Seller su 'accept': {error_msg}")
-                    self.remove_relation("accept", ID)
+                    self.adapter.remove_relation("accept", ID)
                     raise BSPLExecutionError(f"Errore remoto su 'accept': {error_msg}")
                 logger.info(f"[Buyer] Risposta per 'accept': {result.content}")
         except Exception:
-            self.remove_relation("accept", ID)
+            self.adapter.remove_relation("accept", ID)
             raise
 
     async def send_reject(
@@ -209,7 +210,7 @@ class BuyerNode(BaseRoleNode):
         I parametri [in] (ID, item, price) vengono verificati e risolti dallo stato locale.
         """
         # 1. Verifica di viabilità LoST sui nomi dei parametri
-        in_values = self.check_viability(
+        in_values = self.adapter.check_viability(
             ID,
             in_params=["ID", "item", "price"],
             out_params=["outcome", "response"],
@@ -218,7 +219,7 @@ class BuyerNode(BaseRoleNode):
         params = {**in_values, "outcome": outcome, "response": response}
 
         # 2. Inserimento locale nella relazione R(reject)
-        self.insert_relation("reject", ID, params)
+        self.adapter.insert_relation("reject", ID, params)
 
         await asyncio.sleep(0.05)
         logger.info(f"[Buyer -> Seller] Invocazione Tool 'reject': ID={ID!r}, outcome={outcome!r}, response={response!r}")
@@ -228,9 +229,9 @@ class BuyerNode(BaseRoleNode):
                 if result.is_error:
                     error_msg = str(result.content)
                     logger.error(f"❌ [Buyer] Errore dal server Seller su 'reject': {error_msg}")
-                    self.remove_relation("reject", ID)
+                    self.adapter.remove_relation("reject", ID)
                     raise BSPLExecutionError(f"Errore remoto su 'reject': {error_msg}")
                 logger.info(f"[Buyer] Risposta per 'reject': {result.content}")
         except Exception:
-            self.remove_relation("reject", ID)
+            self.adapter.remove_relation("reject", ID)
             raise

@@ -2,7 +2,7 @@
 Implementazione del ruolo 'Shipper' per il protocollo BSPL PurchaseWithDelivery.
 
 Definizione del ruolo nel protocollo:
-- Relazioni Locali LoST:
+- Relazioni Locali LoST gestite da self.adapter:
   * R(ship):    [ID, item, address]
   * R(deliver): [ID, item, address, outcome]
 - RICEZIONE (Tool MCP esposti):
@@ -17,7 +17,8 @@ from typing import Annotated, Any, Dict
 from pydantic import Field
 from mcp import Client
 from config import SHIPPER_HOST, SHIPPER_PORT, BUYER_URL
-from roles.base import BaseRoleNode, BSPLExecutionError
+from roles.base import BaseRoleNode
+from roles.exceptions import BSPLExecutionError
 
 logger = logging.getLogger("Shipper")
 
@@ -26,23 +27,23 @@ class ShipperNode(BaseRoleNode):
     """
     Nodo ibrido per il ruolo Shipper.
     Gestisce le relazioni locali R(ship) e R(deliver),
-    il tool di ricezione 'ship' e il metodo di emissione 'send_deliver' con verifiche formali LoST.
+    il tool di ricezione 'ship' e il metodo di emissione 'send_deliver' con verifiche formali LoST tramite self.adapter.
     """
 
     def __init__(self, host: str = SHIPPER_HOST, port: int = SHIPPER_PORT):
         super().__init__(name="Shipper", host=host, port=port)
 
     # ----------------------------------------------------------------------
-    # Proprietà di accesso rapido alle relazioni locali
+    # Proprietà di accesso rapido alle relazioni locali dell'adattatore
     # ----------------------------------------------------------------------
 
     @property
     def r_ship(self) -> Dict[str, Dict[str, Any]]:
-        return self.relations.setdefault("ship", {})
+        return self.adapter.relations.setdefault("ship", {})
 
     @property
     def r_deliver(self) -> Dict[str, Dict[str, Any]]:
-        return self.relations.setdefault("deliver", {})
+        return self.adapter.relations.setdefault("deliver", {})
 
     # ----------------------------------------------------------------------
     # Tool MCP Esposti (Ricezione messaggi BSPL)
@@ -65,15 +66,15 @@ class ShipperNode(BaseRoleNode):
             params = {"ID": ID, "item": item, "address": address}
 
             # 1. Verifica di consistenza semantica (immutabilità BSPL)
-            self.check_consistency(ID, params)
+            self.adapter.check_consistency(ID, params)
 
             # 2. Controllo duplicati (idempotenza)
-            if self.is_duplicate("ship", ID, params):
+            if self.adapter.is_duplicate("ship", ID, params):
                 logger.info(f"[Shipper] Messaggio 'ship' già registrato per ID={ID!r} (duplicato idempotente)")
                 return f"Spedizione già registrata per ID={ID}."
 
             # 3. Inserimento nella relazione locale R(ship)
-            self.insert_relation("ship", ID, params)
+            self.adapter.insert_relation("ship", ID, params)
 
             # 4. Notifica evento arrivo ordine di spedizione
             self._notify_message_received("ship", ID)
@@ -95,7 +96,7 @@ class ShipperNode(BaseRoleNode):
         I parametri [in] (ID, item, address) vengono verificati e risolti dallo stato locale.
         """
         # 1. Verifica di viabilità LoST sui nomi dei parametri
-        in_values = self.check_viability(
+        in_values = self.adapter.check_viability(
             ID,
             in_params=["ID", "item", "address"],
             out_params=["outcome"],
@@ -104,7 +105,7 @@ class ShipperNode(BaseRoleNode):
         params = {**in_values, "outcome": outcome}
 
         # 2. Inserimento locale nella relazione R(deliver)
-        self.insert_relation("deliver", ID, params)
+        self.adapter.insert_relation("deliver", ID, params)
 
         await asyncio.sleep(0.05)
         logger.info(f"[Shipper -> Buyer] Invocazione Tool 'deliver': ID={ID!r}, outcome={outcome!r}")
@@ -114,9 +115,9 @@ class ShipperNode(BaseRoleNode):
                 if result.is_error:
                     error_msg = str(result.content)
                     logger.error(f"❌ [Shipper] Errore dal server Buyer su 'deliver': {error_msg}")
-                    self.remove_relation("deliver", ID)
+                    self.adapter.remove_relation("deliver", ID)
                     raise BSPLExecutionError(f"Errore remoto su 'deliver': {error_msg}")
                 logger.info(f"[Shipper] Risposta per 'deliver': {result.content}")
         except Exception:
-            self.remove_relation("deliver", ID)
+            self.adapter.remove_relation("deliver", ID)
             raise

@@ -86,9 +86,11 @@ PurchaseWithDelivery {
 ├── pytest.ini                # Configurazione per pytest-asyncio
 ├── requirements.txt          # Dipendenze Python (mcp>=2.0.0, uvicorn, pytest)
 ├── roles/
-│   ├── __init__.py           # Export dei nodi e delle eccezioni BSPL
-│   ├── base.py               # BaseRoleNode (Server MCP, relazioni LoST, viabilità, consistenza)
+│   ├── __init__.py           # Export dei nodi, di BSPLAdapter e delle eccezioni BSPL
+│   ├── adapter.py            # BSPLAdapter (gestione relazioni LoST, viabilità, consistenza, duplicati)
+│   ├── base.py               # BaseRoleNode (Server MCP su Streamable HTTP, integrazione adapter)
 │   ├── buyer.py              # Ruolo Buyer
+│   ├── exceptions.py         # Gerarchia eccezioni BSPL derivata da ToolError
 │   ├── seller.py             # Ruolo Seller
 │   └── shipper.py            # Ruolo Shipper
 ├── tests/

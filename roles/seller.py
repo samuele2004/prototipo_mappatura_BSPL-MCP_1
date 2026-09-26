@@ -2,7 +2,7 @@
 Implementazione del ruolo 'Seller' per il protocollo BSPL PurchaseWithDelivery.
 
 Definizione del ruolo nel protocollo:
-- Relazioni Locali LoST:
+- Relazioni Locali LoST gestite da self.adapter:
   * R(rfq):    [ID, item]
   * R(quote):  [ID, item, price]
   * R(accept): [ID, item, price, address, response]
@@ -23,7 +23,8 @@ from typing import Annotated, Any, Dict
 from pydantic import Field
 from mcp import Client
 from config import SELLER_HOST, SELLER_PORT, BUYER_URL, SHIPPER_URL
-from roles.base import BaseRoleNode, BSPLExecutionError
+from roles.base import BaseRoleNode
+from roles.exceptions import BSPLExecutionError
 
 logger = logging.getLogger("Seller")
 
@@ -32,35 +33,35 @@ class SellerNode(BaseRoleNode):
     """
     Nodo ibrido per il ruolo Seller.
     Gestisce le relazioni locali R(rfq), R(quote), R(accept), R(reject), R(ship),
-    i tool di ricezione e i metodi di emissione con verifiche formali LoST.
+    i tool di ricezione e i metodi di emissione con verifiche formali LoST tramite self.adapter.
     """
 
     def __init__(self, host: str = SELLER_HOST, port: int = SELLER_PORT):
         super().__init__(name="Seller", host=host, port=port)
 
     # ----------------------------------------------------------------------
-    # Proprietà di accesso rapido alle relazioni locali
+    # Proprietà di accesso rapido alle relazioni locali dell'adattatore
     # ----------------------------------------------------------------------
 
     @property
     def r_rfq(self) -> Dict[str, Dict[str, Any]]:
-        return self.relations.setdefault("rfq", {})
+        return self.adapter.relations.setdefault("rfq", {})
 
     @property
     def r_quote(self) -> Dict[str, Dict[str, Any]]:
-        return self.relations.setdefault("quote", {})
+        return self.adapter.relations.setdefault("quote", {})
 
     @property
     def r_accept(self) -> Dict[str, Dict[str, Any]]:
-        return self.relations.setdefault("accept", {})
+        return self.adapter.relations.setdefault("accept", {})
 
     @property
     def r_reject(self) -> Dict[str, Dict[str, Any]]:
-        return self.relations.setdefault("reject", {})
+        return self.adapter.relations.setdefault("reject", {})
 
     @property
     def r_ship(self) -> Dict[str, Dict[str, Any]]:
-        return self.relations.setdefault("ship", {})
+        return self.adapter.relations.setdefault("ship", {})
 
     # ----------------------------------------------------------------------
     # Tool MCP Esposti (Ricezione messaggi BSPL)
@@ -82,15 +83,15 @@ class SellerNode(BaseRoleNode):
             params = {"ID": ID, "item": item}
 
             # 1. Verifica di consistenza semantica (immutabilità BSPL)
-            self.check_consistency(ID, params)
+            self.adapter.check_consistency(ID, params)
 
             # 2. Controllo duplicati (idempotenza)
-            if self.is_duplicate("rfq", ID, params):
+            if self.adapter.is_duplicate("rfq", ID, params):
                 logger.info(f"[Seller] Messaggio 'rfq' già registrato per ID={ID!r} (duplicato idempotente)")
                 return f"RFQ già registrata per ID={ID}."
 
             # 3. Inserimento nella relazione locale R(rfq)
-            self.insert_relation("rfq", ID, params)
+            self.adapter.insert_relation("rfq", ID, params)
 
             # 4. Notifica evento arrivo RFQ
             self._notify_message_received("rfq", ID)
@@ -122,15 +123,15 @@ class SellerNode(BaseRoleNode):
             }
 
             # 1. Verifica di consistenza semantica (immutabilità BSPL su item, price, response)
-            self.check_consistency(ID, params)
+            self.adapter.check_consistency(ID, params)
 
             # 2. Controllo duplicati (idempotenza)
-            if self.is_duplicate("accept", ID, params):
+            if self.adapter.is_duplicate("accept", ID, params):
                 logger.info(f"[Seller] Messaggio 'accept' già registrato per ID={ID!r} (duplicato idempotente)")
                 return f"Accettazione già registrata per ID={ID}."
 
             # 3. Inserimento nella relazione locale R(accept)
-            self.insert_relation("accept", ID, params)
+            self.adapter.insert_relation("accept", ID, params)
 
             # 4. Notifica evento accettazione
             self._notify_message_received("accept", ID)
@@ -162,15 +163,15 @@ class SellerNode(BaseRoleNode):
             }
 
             # 1. Verifica di consistenza semantica (immutabilità BSPL)
-            self.check_consistency(ID, params)
+            self.adapter.check_consistency(ID, params)
 
             # 2. Controllo duplicati (idempotenza)
-            if self.is_duplicate("reject", ID, params):
+            if self.adapter.is_duplicate("reject", ID, params):
                 logger.info(f"[Seller] Messaggio 'reject' già registrato per ID={ID!r} (duplicato idempotente)")
                 return f"Rifiuto già registrato per ID={ID}."
 
             # 3. Inserimento nella relazione locale R(reject)
-            self.insert_relation("reject", ID, params)
+            self.adapter.insert_relation("reject", ID, params)
 
             # 4. Notifica evento rifiuto
             self._notify_message_received("reject", ID)
@@ -188,7 +189,7 @@ class SellerNode(BaseRoleNode):
         I parametri [in] (ID, item) vengono verificati e risolti dallo stato locale.
         """
         # 1. Verifica di viabilità LoST sui nomi dei parametri
-        in_values = self.check_viability(
+        in_values = self.adapter.check_viability(
             ID,
             in_params=["ID", "item"],
             out_params=["price"],
@@ -197,7 +198,7 @@ class SellerNode(BaseRoleNode):
         params = {**in_values, "price": price}
 
         # 2. Inserimento locale nella relazione R(quote)
-        self.insert_relation("quote", ID, params)
+        self.adapter.insert_relation("quote", ID, params)
 
         await asyncio.sleep(0.05)
         logger.info(f"[Seller -> Buyer] Invocazione Tool 'quote': ID={ID!r}, price={price}")
@@ -207,11 +208,11 @@ class SellerNode(BaseRoleNode):
                 if result.is_error:
                     error_msg = str(result.content)
                     logger.error(f"❌ [Seller] Errore dal server Buyer su 'quote': {error_msg}")
-                    self.remove_relation("quote", ID)
+                    self.adapter.remove_relation("quote", ID)
                     raise BSPLExecutionError(f"Errore remoto su 'quote': {error_msg}")
                 logger.info(f"[Seller] Risposta per 'quote': {result.content}")
         except Exception:
-            self.remove_relation("quote", ID)
+            self.adapter.remove_relation("quote", ID)
             raise
 
     async def send_ship(self, ID: str):
@@ -221,7 +222,7 @@ class SellerNode(BaseRoleNode):
         Tutti i parametri sono [in] (ID, item, address) e vengono verificati e risolti dallo stato locale.
         """
         # 1. Verifica di viabilità LoST sui nomi dei parametri
-        in_values = self.check_viability(
+        in_values = self.adapter.check_viability(
             ID,
             in_params=["ID", "item", "address"],
         )
@@ -229,7 +230,7 @@ class SellerNode(BaseRoleNode):
         params = dict(in_values)
 
         # 2. Inserimento locale nella relazione R(ship)
-        self.insert_relation("ship", ID, params)
+        self.adapter.insert_relation("ship", ID, params)
 
         await asyncio.sleep(0.05)
         logger.info(f"[Seller -> Shipper] Invocazione Tool 'ship': ID={ID!r}, address={params.get('address')!r}")
@@ -239,9 +240,9 @@ class SellerNode(BaseRoleNode):
                 if result.is_error:
                     error_msg = str(result.content)
                     logger.error(f"❌ [Seller] Errore dal server Shipper su 'ship': {error_msg}")
-                    self.remove_relation("ship", ID)
+                    self.adapter.remove_relation("ship", ID)
                     raise BSPLExecutionError(f"Errore remoto su 'ship': {error_msg}")
                 logger.info(f"[Seller] Risposta per 'ship': {result.content}")
         except Exception:
-            self.remove_relation("ship", ID)
+            self.adapter.remove_relation("ship", ID)
             raise
